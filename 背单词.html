@@ -350,7 +350,9 @@ nav.tabs.is-dim { opacity: .45; }
 .btn {
   appearance: none; cursor: pointer; font: inherit;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 10px 17px; min-height: 42px;
+  /* 触摸目标 ≥46px —— 手机端可点面积不能太小（触控规范约 44–48px），
+     窄屏断点里会再加到 48px */
+  padding: 11px 18px; min-height: 46px;
   border-radius: var(--radius);
   border: 1px solid var(--border-strong);
   background: var(--surface-2); color: var(--text-primary);
@@ -846,7 +848,7 @@ nav.tabs.is-dim { opacity: .45; }
 
 .filter-bar { display: flex; gap: 9px; flex-wrap: wrap; }
 .input {
-  font: inherit; padding: 9px 12px; min-height: 42px;
+  font: inherit; padding: 10px 13px; min-height: 46px;
   border-radius: var(--radius); border: 1px solid var(--border-strong);
   background: var(--surface-2); color: var(--text-primary);
   transition: border-color .15s, box-shadow .15s;
@@ -1109,27 +1111,63 @@ input:focus-visible, [tabindex]:focus-visible {
 /* ------------------------------------------------------------------ 窄屏 */
 
 @media (max-width: 620px) {
-  .app { padding: 0 12px calc(48px + env(safe-area-inset-bottom)); }
-  .tiles { grid-template-columns: repeat(2, 1fr); }
+  .app { padding: 0 14px calc(56px + env(safe-area-inset-bottom)); }
+  /* 页面级间距放宽，卡片之间不贴在一起 */
+  .page, .sub-view { gap: 22px; }
+  .tiles { grid-template-columns: repeat(2, 1fr); gap: 9px; }
   .grade-row { grid-template-columns: repeat(2, 1fr); }
   .triage-actions { grid-template-columns: 1fr; }
-  .lv-btn { flex-direction: row; justify-content: flex-start; gap: 10px; padding: 14px 15px; }
+  .lv-btn { flex-direction: row; justify-content: flex-start; gap: 10px; padding: 16px 16px; }
   .lv-btn:hover { transform: none; }
   .word-main { grid-template-columns: 1fr auto; grid-auto-rows: min-content; gap: 4px 8px; }
   .w-def { grid-column: 1 / -1; white-space: normal; }
   .w-freq, .w-due { font-size: .72rem; }
-  .review-meta { flex-wrap: wrap; }
+  .review-meta { flex-wrap: wrap; gap: 10px; }
   .action-title { font-size: 1.22rem; }
   .hero-num { font-size: 2.1rem; }
-  .action-card, .card, .triage-card, .triage-done { padding: 20px 17px; }
+  /* 卡片统一加大内边距，文字不贴边 */
+  .action-card, .card, .triage-card, .triage-done, .chart-card, .set-group { padding: 22px 18px; }
+  /* 触控目标统一 ≥48px */
+  .btn, .input { min-height: 48px; }
+  .btn { padding: 12px 18px; }
+  /* 设置页：控件铺满宽度、间距放宽，不局促 */
+  .set-group { gap: 22px; }
+  .field { gap: 9px; }
+  .field-label { font-size: .96rem; }
+  .field-note { line-height: 1.7; }
+  .field > .input--sel { width: 100%; }
+  /* 数字输入框不再固定死宽，随卡片收缩 */
+  .input--num { width: auto; min-width: 80px; max-width: 110px; }
+  .input--tiny { width: auto; min-width: 62px; max-width: 72px; }
+  .quota-row { gap: 12px; }
+  .quota-item { gap: 8px; }
+  /* 复习/普查按钮可点面积加大 */
+  .grade-btn { padding: 16px 6px; }
+  .quiz-opt { padding: 15px 15px; min-height: 56px; }
+  .lv-pill { padding: 8px 14px; }
+  .tile { padding: 16px 13px; gap: 4px; }
+  /* 首页 EXP 条压缩高度、间距更紧凑 */
+  .exp-bar { padding: 12px 15px; gap: 11px; }
+  .exp-badge { width: 44px; height: 44px; border-radius: 12px; }
+  /* 首页文字描述收紧，减少滚动长度 */
+  .action-desc { font-size: .95rem; }
+  .action-hint { font-size: .85rem; line-height: 1.65; }
   /* 触屏没有 hover，位移动画只会在点击后残留 */
-  .quiz-opt:hover:not(:disabled), .grade-btn:hover, .tile:hover { transform: none; }
+  .quiz-opt:hover:not(:disabled), .grade-btn:hover, .tile:hover, .lv-btn:hover { transform: none; }
 }
 
 /* 中低端手机上毛玻璃是最贵的一项，屏幕窄时直接换成实色 */
 @media (max-width: 480px) {
   :root { --glass: none; --surface-1: rgba(26, 22, 50, 0.92); }
   :root[data-theme="light"] { --surface-1: rgba(255,255,255,.95); }
+  /* 极窄屏：内边距再收一点，内容不溢出 */
+  .app { padding: 0 14px calc(52px + env(safe-area-inset-bottom)); }
+  .action-card, .card, .triage-card, .triage-done, .chart-card, .set-group { padding: 20px 16px; }
+  .page, .sub-view { gap: 20px; }
+  .tiles { gap: 8px; }
+  .tile { padding: 14px 12px; }
+  /* 词书筛选栏：搜索框别再占 180px 硬宽，给两个下拉留位置 */
+  .filter-bar .input[type="search"] { min-width: 140px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
