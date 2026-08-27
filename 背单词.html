@@ -190,12 +190,18 @@ html { background: var(--page); }
 
 body {
   margin: 0; padding: 0;
+  /* 100vh 兜底 + 100dvh 精确动态视口：地址栏收起/展开时背景和内容一起对 */
   min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(1200px 800px at 12% -10%, rgba(124, 58, 237, .22), transparent 60%),
     radial-gradient(1000px 700px at 92% 8%,  rgba(6, 182, 212, .16),  transparent 62%),
     linear-gradient(168deg, var(--page) 0%, var(--page-2) 55%, var(--page) 100%);
-  background-attachment: fixed;
+  /* ⚠ 不要在这里用 background-attachment: fixed。
+     安卓 Chrome 对多层渐变 + fixed + 页面 transform 动画有渲染 bug，
+     表现为背景大面积变黑、内容区下面一片纯黑 —— 手机上实测踩过。
+     去掉后背景随 body 铺开，body 高度至少 100dvh，渐变自然盖满首屏。 */
+  overflow-x: hidden;
   color: var(--text-primary);
   font-family: var(--font-ui);
   font-size: 15px;
