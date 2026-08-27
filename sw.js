@@ -19,7 +19,7 @@
  *    还是旧词库。改代码则不需要，SWR 会自动更新。
  * =========================================================================== */
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE   = 'kaoyan-vocab-' + VERSION;
 
 /* 首次安装时预缓存的清单。
@@ -32,6 +32,7 @@ const ASSETS = [
   'manifest.json',
   'data/sample.js',
   'data/wordbook.js',
+  'data/corpus.js',
   'js/store.js',
   'js/engine.js',
   'js/wordbook.js',

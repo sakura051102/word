@@ -24,7 +24,6 @@ window.Store = (function () {
       triageBatch: 100,               // 普查每批词数
       autoSpeak: true,                // 翻面自动朗读
       reviewBeforeTriageDone: false,  // 允许普查未完成就开始复习
-      showRareDefs: false,            // 全局展开生僻义
       quizRatio: 0.5,                 // 选择题占比
       theme: 'auto'                   // auto | light | dark
     },

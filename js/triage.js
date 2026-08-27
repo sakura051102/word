@@ -6,8 +6,8 @@
  *  关键设计：点「熟词」时【强制核对】—— 翻开释义确认真的知道才归档。
  *  只看单词就点「基本不会忘」太容易把「眼熟」当成「会」，
  *  而整个复习计划都建立在这份档案之上，档案不准后面全歪。
- *  核对时只显示常考义（studyOnly），生僻义不参与判断 ——
- *  否则会因为不认识某个用不上的义项而误判自己不会。
+ *  核对时只给释义，例句/搭配/真题原句一概不显示 ——
+ *  这一步要重复五千多次，每多一行都会被放大五千倍。
  * =========================================================================== */
 
 window.Triage = (function () {
@@ -271,10 +271,11 @@ window.Triage = (function () {
     box.appendChild(el('div', { class: 'verify-banner',
       text: '你选了「熟词」。核对一下 —— 下面这些意思，刚才真的想起来了吗？' }));
 
-    // studyOnly：只显示常考义。生僻义不该影响「我会不会这个词」的判断。
-    // 例句和同根词也关掉 —— 普查要过 5000 多个词，这一步必须快。
+    // 普查要过 5530 个词，这一步必须快 ——
+    // 只给释义，例句/搭配/相关词/真题原句全部关掉。
+    // 判断「我认不认识这个词」不需要那些，多一行都是在拖慢节奏。
     box.appendChild(window.DefsView.render(entry, {
-      studyOnly: true, showExtras: false, showExamples: false
+      showExtras: false, showExamples: false, showPhrases: false, showCites: false
     }));
 
     const acts = el('div', { class: 'verify-actions' });

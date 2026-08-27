@@ -565,39 +565,16 @@ nav.tabs.is-dim { opacity: .45; }
 .def-list { display: flex; flex-direction: column; gap: 8px; }
 .def {
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-  padding-left: 13px; border-left: 2px solid transparent;
+  padding-left: 13px; border-left: 2px solid var(--grid);
 }
 .def-text { color: var(--text-primary); }
-.def--high { border-left-color: var(--series-1); box-shadow: -1px 0 12px -4px var(--series-1); }
-.def--high .def-text { font-weight: 620; font-size: 1.06em; }
-.def--mid  { border-left-color: var(--grid); }
-.def--rare .def-text { color: var(--text-muted); }
-.def-list--rare { opacity: .9; }
 
-.def-tag {
-  font-size: .7rem; padding: 1px 7px; border-radius: 5px;
-  border: 1px solid var(--border-strong); color: var(--text-muted);
-}
-.def-tag--high { color: var(--series-1); border-color: var(--series-1); }
+/* ★ 那套「义项级真题标注」的样式已经删掉了 ——
+   词库里 defs[].tag / defs[].count 五千多条全是空，那些规则一个像素都没渲染过。
+   现在换成下面的【词条级】真题原句：不做词义消歧，只把原句原样摆出来。 */
 
-/* ★ 只在真的有真题出处时出现 —— 见 ui.js citeBadge */
-.cite-btn {
-  appearance: none; cursor: pointer; font: inherit; font-size: .74rem;
-  display: inline-flex; align-items: center; gap: 3px;
-  padding: 1px 8px; border-radius: 20px;
-  border: 1px solid var(--series-1);
-  background: none; color: var(--series-1);
-}
-.cite-btn:hover, .cite-btn.is-open {
-  background: color-mix(in srgb, var(--series-1) 16%, transparent);
-  box-shadow: var(--glow-soft);
-}
-.cite-star { font-size: .8em; }
-
-/* 单词级真题词频徽章 —— 与上面的★刻意区分。
-   ★(cite-btn) = 义项级，点开能看到该义项的具体出处原句；
-   这里(freq-badge) = 单词级，只说明这个词出现过多少次、不区分义项。
-   两者用不同颜色和样式，免得把「词常考」误读成「这个义项常考」。 */
+/* 单词级真题词频徽章。数字只说明「这个词考过多少次」，不说明考的是哪个义项，
+   所以它待在词头，不下沉到义项旁边。 */
 .freq-badge {
   display: inline-flex; align-items: center;
   font-size: .72rem; padding: 2px 8px; border-radius: 20px;
@@ -606,23 +583,32 @@ nav.tabs.is-dim { opacity: .45; }
   background: var(--surface-2);
 }
 .freq-badge--none { opacity: .7; }
-.cite-panel {
-  flex-basis: 100%; margin: 5px 0 2px 13px; padding: 11px 13px;
-  border-radius: var(--radius); background: var(--surface-2);
-  border: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 8px;
-}
-.cite-src { font-size: .74rem; color: var(--text-muted); display: block; }
-.cite-sent { margin: 2px 0 0; font-size: .88rem; color: var(--text-secondary); line-height: 1.55; }
-.cite-more, .cite-none { font-size: .78rem; color: var(--text-muted); }
 
-.rare-toggle {
-  appearance: none; cursor: pointer; font: inherit; font-size: .82rem;
-  align-self: flex-start; padding: 3px 0;
-  border: 0; background: none; color: var(--text-muted);
-  text-decoration: underline; text-underline-offset: 3px;
+/* ------------------------------------------------- 真题原句 */
+
+/* 这是全卡片上唯一「真实考过」的内容，视觉权重要压过词库自带的通用例句：
+   给一条青色发光左边线，例句区只有一条灰线。 */
+.cites { margin-top: 4px; }
+.cite-list { display: flex; flex-direction: column; gap: 11px; }
+.cite-item {
+  padding: 9px 0 9px 13px;
+  border-left: 2px solid var(--series-1);
+  box-shadow: -1px 0 14px -6px var(--series-1);
 }
-.rare-toggle:hover { color: var(--series-1); }
+.cite-sent {
+  display: flex; align-items: flex-start; gap: 6px;
+  margin: 0 0 4px; font-size: .92rem; line-height: 1.6;
+  color: var(--text-primary);
+}
+.cite-sent .speak-btn { flex-shrink: 0; }
+.cite-src {
+  display: inline-block;
+  font-size: .71rem; font-family: var(--font-num);
+  padding: 1px 7px; border-radius: 20px;
+  color: var(--series-1);
+  border: 1px solid color-mix(in srgb, var(--series-1) 40%, transparent);
+  background: color-mix(in srgb, var(--series-1) 10%, transparent);
+}
 
 .sub-head {
   font-size: .72rem; letter-spacing: .1em; color: var(--series-1);
@@ -638,7 +624,7 @@ nav.tabs.is-dim { opacity: .45; }
   border: 1px solid var(--border);
 }
 .phrase-zh { color: var(--text-secondary); font-size: .92em; }
-.roots, .related { font-size: .86rem; color: var(--text-secondary); line-height: 1.7; }
+.related { font-size: .86rem; color: var(--text-secondary); line-height: 1.7; }
 
 /* 例句 */
 .examples { margin-top: 4px; }
@@ -1178,6 +1164,12 @@ input:focus-visible, [tabindex]:focus-visible {
 -->
 <script src="data/sample.js"></script>
 <script src="data/wordbook.js"></script>
+<!--
+  真题原句索引（可选）。
+  由 tools/build-corpus.js 从 1998–2022 年英语一阅读+翻译原文生成。
+  文件不存在时这一行静默 404，卡片上就不显示「真题原句」区块，其余功能不受影响。
+-->
+<script src="data/corpus.js"></script>
 
 <!-- 程序：顺序即依赖顺序 -->
 <script src="js/store.js"></script>

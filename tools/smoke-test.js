@@ -264,7 +264,7 @@ function load(rel) {
 }
 
 [
-  'data/sample.js', 'data/wordbook.js',
+  'data/sample.js', 'data/wordbook.js', 'data/corpus.js',
   'js/store.js', 'js/engine.js', 'js/wordbook.js', 'js/fx.js',
   'js/ui.js', 'js/charts.js', 'js/triage.js', 'js/review.js', 'js/app.js'
 ].forEach(load);
@@ -483,6 +483,94 @@ const json = S.exportJSON();
 const insp = S.inspectImport(json);
 check('导出的备份能被自己导入校验', insp.ok === true, insp.error);
 check('  备份里的卡片数对得上', insp.summary.cardCount === Object.keys(S.get().cards).length);
+
+/* ---------------------------------------------------------------- 真题原句 */
+
+section('真题原句（词条级索引）');
+
+const cm = win.WB.corpusMeta();
+check('语料已加载', !!cm, '没读到 window.CORPUS');
+
+if (cm) {
+  check('  覆盖 3000 个以上词条', cm.words > 3000, '实际 ' + cm.words);
+  check('  年份区间完整', /^\d{4}–\d{4}$/.test(cm.years), cm.years);
+
+  /*
+   * 【最重要的一条】索引不能张冠李戴：A 词的句子不能挂到 B 词名下。
+   *
+   * 判据故意【不复用】build-corpus.js 的还原器 —— 那样等于自己证明自己。
+   * 这里用一个独立的字面判据：句中要有一个 token 和词头共享足够长的前缀。
+   *
+   * 但前缀比对有三类【原理上抓不到】的合法情况，必须先归一化或让过：
+   *   1. 英美拼写   organise / organizing，practise / practice
+   *      → 把 z、c 都归一成 s 再比
+   *   2. 词干变形   rise / rising（丢 e），vary / varied（y→i）
+   *      → 比对前先砍掉词尾的 e、把词尾 y 换成 i
+   *   3. 不规则动词 write / wrote，fight / fought
+   *      → 词干整个变了，任何前缀规则都无能为力，只能算进残差
+   *
+   * 所以这里断言的是【残差率】而不是零。阈值 3% 的意义：
+   * 不规则动词在大纲里占比很小，正常残差是 1% 上下；
+   * 一旦还原器真的坏掉（比如两步剥离失控），残差会直接飙到两位数。
+   * 每条残差都打印出来，可以逐条肉眼确认。
+   */
+  function norm(x) {
+    return x.toLowerCase()
+            .replace(/[zc]/g, 's')      // organize/practice → organise/practise
+            .replace(/e$/, '')          // rise → ris，好和 rising 对上
+            .replace(/y$/, 'i');        // vary → vari，好和 varied/varies 对上
+  }
+
+  const C = win.CORPUS;
+  const keys = Object.keys(C.index);
+  let checked = 0, bad = 0;
+  const badSample = [];
+
+  for (let i = 0; i < keys.length && checked < 400; i += Math.ceil(keys.length / 400)) {
+    const w = keys[i];
+    if (w.length < 4) continue;            // 太短的词前缀判据没有区分度
+    const nw = norm(w);
+    C.index[w].forEach(function (si) {
+      const s = C.sents[si];
+      if (!s) return;
+      checked++;
+      const toks = String(s[1]).match(/[A-Za-z]+/g) || [];
+      const hit = toks.some(function (t) {
+        const nt = norm(t);
+        const n = Math.max(3, Math.min(nt.length, nw.length) - 1);
+        return nt.slice(0, n) === nw.slice(0, n);
+      });
+      if (!hit) { bad++; if (badSample.length < 6) badSample.push(w); }
+    });
+  }
+  const rate = checked ? (bad / checked * 100) : 0;
+  check('  抽查 ' + checked + ' 条原句，字面残差 ' + rate.toFixed(1) + '% （<3% 视为正常）',
+        rate < 3,
+        bad + ' 条对不上，样例：' + badSample.join(', '));
+
+  // 具体词的人工基准：这两个词正是「词条级原句能替代义项级标注」的例证
+  const acc = win.WB.citationsOf('account', 3);
+  check('  account 有真题原句', acc.length > 0);
+  if (acc.length) {
+    check('    原句带出处标记', /\d{4}/.test(acc[0].src), acc[0].src);
+  }
+  check('  wink（真题 0 次）没有原句', win.WB.citationsOf('wink', 3).length === 0);
+  check('  citeLimit 生效', win.WB.citationsOf('account', 1).length === 1);
+}
+
+/* --- 死代码是否真的清干净了 --- */
+section('旧的义项级标注已移除');
+check('WB.rareDefs 已删除', typeof win.WB.rareDefs === 'undefined');
+check('WB.hasCitations 已删除', typeof win.WB.hasCitations === 'undefined');
+check('WB.citationCount 已删除', typeof win.WB.citationCount === 'undefined');
+check('设置里不再有 showRareDefs', !('showRareDefs' in S.get().settings));
+
+queryAll(nav, '.tab')[3].click();
+const labels = queryAll(main, '.check-label').map(function (n) { return n.textContent; });
+check('设置页不再有「默认展开生僻义」这个假开关',
+      labels.every(function (t) { return t.indexOf('生僻义') < 0; }), labels.join(' / '));
+check('设置页出现「真题语料」信息组',
+      queryAll(main, '.set-title').some(function (n) { return n.textContent.indexOf('真题语料') >= 0; }));
 
 /* ---------------------------------------------------------------- 结果 */
 

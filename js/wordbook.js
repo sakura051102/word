@@ -52,25 +52,19 @@ window.WB = (function () {
   /* ------------------------------------------------------------ 义项筛选 */
 
   /**
-   * 用于「学习」的义项 —— 复习正面、选择题答案与干扰项都用这个。
+   * 用于「学习」的义项 —— 复习正面、选择题答案与干扰项都从这里取。
    *
-   * 规则：排除 tag === 'rare' 的义项。
-   * 但如果一个词【全部】义项都是 rare（或压根没有 tag），
-   * 则退回全部义项 —— 否则这些词会没有答案文本可用，直接从复习里消失。
+   * 目前是恒等函数：词库没有义项级分级数据（defs[].tag 全为空），
+   * 所有义项一视同仁。
    *
-   * 换句话说，「生僻义不作为答案」是相对该词自身的其他义项而言，不是绝对排除。
+   * 那为什么不直接用 entry.defs？
+   * 因为这是「哪些义项可以拿去考人」这个口径的唯一入口。
+   * 上层（复习正面、选择题答案、干扰项、词书列表）四处如果各自读 entry.defs，
+   * 以后想加任何筛选规则就得同时改四个地方，还很容易漏一个 ——
+   * 那种漏法的表现是「选择题的答案和卡片正面显示的不一致」，极难排查。
    */
   function studyDefs(entry) {
-    const defs = (entry && entry.defs) || [];
-    const useful = defs.filter(function (d) { return d.tag !== 'rare'; });
-    return useful.length ? useful : defs;
-  }
-
-  /** 生僻义（默认折叠的那部分）。没有分级标注的词返回空数组 */
-  function rareDefs(entry) {
-    const defs = (entry && entry.defs) || [];
-    const useful = defs.filter(function (d) { return d.tag !== 'rare'; });
-    return useful.length ? defs.filter(function (d) { return d.tag === 'rare'; }) : [];
+    return (entry && entry.defs) || [];
   }
 
   /** 选择题选项用的短释义文本 */
@@ -100,20 +94,47 @@ window.WB = (function () {
     return hasFreq() && entry && entry.freq === 0;
   }
 
-  /** 义项级真题标注（★）—— 需要真题语料逐句判义才能生成，目前一律为无 */
-  function hasCitations(entry) {
-    if (!entry) return false;
-    const inDefs = (entry.defs || []).some(function (d) { return (d.count || 0) > 0; });
-    const inPhr  = (entry.phrases || []).some(function (p) { return (p.count || 0) > 0; });
-    return inDefs || inPhr;
+  /**
+   * 该词的真题原句（来自 data/corpus.js，1998–2022 年英语一阅读+翻译）。
+   *
+   * 【这是词条级的】：只保证「这句话里有这个词」，
+   * 不保证句中用的是你正在看的那个义项。
+   *
+   * 之所以停在词条级，是因为义项级需要逐句做词义消歧，
+   * 而消歧错了比不做更糟 —— 把 state 标成「状态常考」
+   * 而真题考的是「规定」，是在主动误导。原句摆在那里，
+   * 你自己一眼就能看出考的是哪个义，比一个猜出来的标签可靠。
+   *
+   * corpus.js 没加载出来时返回空数组，界面自然不显示这一块。
+   */
+  function citationsOf(word, limit) {
+    const C = window.CORPUS;
+    if (!C || !C.index || !C.sents || !C.srcs) return [];
+    const list = C.index[String(word).toLowerCase()];
+    if (!list || !list.length) return [];
+
+    const cap = limit > 0 ? limit : list.length;
+    const out = [];
+    for (let i = 0; i < list.length && out.length < cap; i++) {
+      const s = C.sents[list[i]];
+      if (!s || !s[1]) continue;
+      out.push({ src: C.srcs[s[0]] || '', sent: s[1] });
+    }
+    return out;
   }
 
-  function citationCount(entry) {
-    if (!entry) return 0;
-    let n = 0;
-    (entry.defs || []).forEach(function (d) { n += d.count || 0; });
-    (entry.phrases || []).forEach(function (p) { n += p.count || 0; });
-    return n;
+  /** 语料本身的元信息（设置页展示用）。没加载语料时返回 null */
+  function corpusMeta() {
+    const C = window.CORPUS;
+    if (!C || !C.index) return null;
+    return {
+      name:  C.name || '真题语料',
+      years: C.years || '',
+      texts: C.texts || 0,
+      sents: (C.sents || []).length,
+      words: Object.keys(C.index).length,
+      note:  C.note || ''
+    };
   }
 
   /* ------------------------------------------------------------ 干扰项抽取 */
@@ -192,9 +213,9 @@ window.WB = (function () {
   return {
     init: init, meta: meta, topics: topics,
     all: all, size: size, at: at, get: get, indexOf: indexOf,
-    studyDefs: studyDefs, rareDefs: rareDefs, shortDef: shortDef,
+    studyDefs: studyDefs, shortDef: shortDef,
     hasFreq: hasFreq, freqOf: freqOf, isNeverTested: isNeverTested,
-    hasCitations: hasCitations, citationCount: citationCount,
+    citationsOf: citationsOf, corpusMeta: corpusMeta,
     distractors: distractors, shuffle: shuffle
   };
 })();

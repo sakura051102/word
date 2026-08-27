@@ -173,17 +173,16 @@ window.DefsView = (function () {
 
   const el = window.UI.el;
 
-  const TAG_LABEL = { high: '常考', mid: '较常考' };
-
   /**
    * 渲染一个词条的释义区。
    *
    * opts:
-   *   showRare   —— 是否默认展开生僻义（来自设置）
-   *   studyOnly  —— true 时完全不渲染生僻义区块（普查核对用：
-   *                 判断「我认不认识这个词」不该被生僻义干扰）
-   *   showPhrases—— 是否显示短语搭配，默认 true
-   *   showExtras —— 是否显示词根/相关词，默认 true
+   *   showPhrases —— 是否显示短语搭配，默认 true
+   *   showExtras  —— 是否显示相关词，默认 true
+   *   showExamples—— 是否显示例句（词库自带的），默认 true
+   *   showCites   —— 是否显示真题原句，默认 true
+   *   citeLimit   —— 最多显示几条真题原句，默认 2
+   *                  （复习卡片上要克制；词书页展开时可以放开）
    */
   function render(entry, opts) {
     opts = opts || {};
@@ -191,36 +190,39 @@ window.DefsView = (function () {
     const showExtras  = opts.showExtras  !== false;
 
     const root  = el('div', { class: 'defs-view' });
-    const study = window.WB.studyDefs(entry);
-    const rare  = opts.studyOnly ? [] : window.WB.rareDefs(entry);
 
-    /* --- 主要义项 --- */
+    /* --- 义项 --- */
     const list = el('ul', { class: 'def-list' });
-    study.forEach(function (d) { list.appendChild(defRow(d)); });
+    window.WB.studyDefs(entry).forEach(function (d) { list.appendChild(defRow(d)); });
     root.appendChild(list);
 
-    /* --- 生僻义：默认折叠 --- */
-    if (rare.length) {
-      const rareList = el('ul', { class: 'def-list def-list--rare' });
-      rare.forEach(function (d) { rareList.appendChild(defRow(d)); });
-
-      const expanded = !!opts.showRare;
-      rareList.hidden = !expanded;
-
-      const toggle = el('button', {
-        class: 'rare-toggle', type: 'button',
-        'aria-expanded': expanded ? 'true' : 'false',
-        text: (expanded ? '收起' : '展开') + ' ' + rare.length + ' 个生僻义'
-      });
-      toggle.addEventListener('click', function () {
-        const nowHidden = !rareList.hidden;
-        rareList.hidden = nowHidden;
-        toggle.setAttribute('aria-expanded', nowHidden ? 'false' : 'true');
-        toggle.textContent = (nowHidden ? '展开' : '收起') + ' ' + rare.length + ' 个生僻义';
-      });
-
-      root.appendChild(toggle);
-      root.appendChild(rareList);
+    /* --- 真题原句：放在词库自带例句【之前】 ---
+       这是唯一一处真实考过的语料，优先级高于教材式的通用例句。 */
+    if (opts.showCites !== false) {
+      const cites = window.WB.citationsOf(entry.word,
+                      opts.citeLimit === undefined ? 2 : opts.citeLimit);
+      if (cites.length) {
+        const box = el('div', { class: 'cites' }, [
+          el('div', { class: 'sub-head', text: '真题原句' })
+        ]);
+        const ul = el('ul', { class: 'cite-list' });
+        cites.forEach(function (c) {
+          const li = el('li', { class: 'cite-item' });
+          const row = el('p', { class: 'cite-sent' }, [el('span', { text: c.sent })]);
+          if (window.Speak.available()) {
+            row.appendChild(el('button', {
+              class: 'speak-btn speak-btn--sm', type: 'button',
+              title: '朗读', 'aria-label': '朗读真题原句',
+              onclick: function (e) { e.stopPropagation(); window.Speak.say(c.sent); }
+            }, [el('span', { text: '🔊', 'aria-hidden': 'true' })]));
+          }
+          li.appendChild(row);
+          if (c.src) li.appendChild(el('span', { class: 'cite-src', text: c.src }));
+          ul.appendChild(li);
+        });
+        box.appendChild(ul);
+        root.appendChild(box);
+      }
     }
 
     /* --- 例句：词条级 entry.examples --- */
@@ -254,25 +256,16 @@ window.DefsView = (function () {
       ]);
       const ul = el('ul', { class: 'phrase-list' });
       entry.phrases.forEach(function (p) {
-        const li = el('li', { class: 'phrase' }, [
+        ul.appendChild(el('li', { class: 'phrase' }, [
           el('code', { class: 'phrase-en', text: p.text }),
           el('span', { class: 'phrase-zh', text: p.zh || '' })
-        ]);
-        const badge = citeBadge(p);
-        if (badge) { li.appendChild(badge.button); li.appendChild(badge.panel); }
-        ul.appendChild(li);
+        ]));
       });
       box.appendChild(ul);
       root.appendChild(box);
     }
 
-    /* --- 词根 / 相关词 --- */
-    if (showExtras && entry.roots) {
-      root.appendChild(el('div', { class: 'roots' }, [
-        el('span', { class: 'sub-head sub-head--inline', text: '构词' }),
-        el('span', { text: entry.roots })
-      ]));
-    }
+    /* --- 相关词（同根词）--- */
     if (showExtras && entry.related && entry.related.length) {
       root.appendChild(el('div', { class: 'related' }, [
         el('span', { class: 'sub-head sub-head--inline', text: '相关' }),
@@ -285,68 +278,9 @@ window.DefsView = (function () {
 
   /* 单条义项 */
   function defRow(d) {
-    const tag = d.tag || null;
-    const li  = el('li', { class: 'def' + (tag ? ' def--' + tag : '') });
-
-    li.appendChild(el('span', { class: 'def-text', text: d.text || '' }));
-
-    if (tag && TAG_LABEL[tag]) {
-      li.appendChild(el('span', { class: 'def-tag def-tag--' + tag, text: TAG_LABEL[tag] }));
-    }
-
-    const badge = citeBadge(d);
-    if (badge) { li.appendChild(badge.button); li.appendChild(badge.panel); }
-
-    return li;
-  }
-
-  /**
-   * 真题标注徽章。
-   *
-   * 【重要】只有 count > 0 才渲染★。
-   * 没有真题出处的义项一律不标 —— 界面留白，不猜、不推测。
-   * 这样用户看到★就一定能点开看到出处，标记的可信度是满的。
-   */
-  function citeBadge(d) {
-    const count = d.count || 0;
-    if (count <= 0) return null;
-
-    const cites = d.cites || [];
-    const panel = el('div', { class: 'cite-panel', hidden: true });
-
-    if (cites.length) {
-      cites.forEach(function (c) {
-        panel.appendChild(el('div', { class: 'cite' }, [
-          el('span', { class: 'cite-src', text: c.src || '' }),
-          el('p',    { class: 'cite-sent', text: c.sent || '' })
-        ]));
-      });
-      if (cites.length < count) {
-        panel.appendChild(el('div', { class: 'cite-more',
-          text: '另有 ' + (count - cites.length) + ' 处未列出' }));
-      }
-    } else {
-      // count > 0 但没存具体句子 —— 如实说明，不编造
-      panel.appendChild(el('div', { class: 'cite-none',
-        text: '统计到 ' + count + ' 处，但本词库未收录具体原句。' }));
-    }
-
-    const btn = el('button', {
-      class: 'cite-btn', type: 'button', 'aria-expanded': 'false',
-      title: '点击查看真题出处'
-    }, [
-      el('span', { class: 'cite-star', text: '★', 'aria-hidden': 'true' }),
-      el('span', { text: '真题 ' + count + ' 次' })
+    return el('li', { class: 'def' }, [
+      el('span', { class: 'def-text', text: (d && d.text) || '' })
     ]);
-
-    btn.addEventListener('click', function () {
-      const nowHidden = !panel.hidden;
-      panel.hidden = nowHidden;
-      btn.setAttribute('aria-expanded', nowHidden ? 'false' : 'true');
-      btn.classList.toggle('is-open', !nowHidden);
-    });
-
-    return { button: btn, panel: panel };
   }
 
   /** 词头：单词 + 音标 + 发音按钮 + 单词级真题词频 */
@@ -374,10 +308,13 @@ window.DefsView = (function () {
   /**
    * 单词级真题词频徽章。
    *
-   * 【刻意不用★】—— 在这套界面里★专指「义项级」真题标注：
-   * 点★能看到那个义项的具体出处原句。
-   * 词频是单词级的：它说明这个词出现过多少次，不说明用的是哪个义项。
-   * 两者用同一个符号会让人误以为「这个义项常考」，所以样式必须区分开。
+   * 这个数字是【单词级】的：它说明这个词在约 200 套真题里出现过多少次，
+   * 不说明用的是哪个义项。所以它只能待在词头，
+   * 绝不能挂到某条义项旁边 —— 那等于宣称「这个义项常考」，
+   * 而这份数据根本不支持那个结论。
+   *
+   * 想知道某个义项到底怎么考的，看下面的「真题原句」区块：
+   * 那里是真实的考题句子，自己判断比看一个推测出来的标签可靠。
    */
   function freqBadge(entry) {
     if (!window.WB.hasFreq()) return null;

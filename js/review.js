@@ -450,9 +450,7 @@ window.Review = (function () {
         }, [el('span', { text: '显示释义' }), el('kbd', { text: 'Space' })])
       ]));
     } else {
-      box.appendChild(window.DefsView.render(it.entry, {
-        showRare: S.get().settings.showRareDefs
-      }));
+      box.appendChild(window.DefsView.render(it.entry, { citeLimit: 2 }));
       box.appendChild(gradeButtons(it));
       box.appendChild(levelSwitch(it));
     }
@@ -568,9 +566,7 @@ window.Review = (function () {
         class: 'quiz-verdict ' + (right ? 'is-right' : 'is-wrong'),
         text: right ? '答对了' : '答错了 —— 这个词已重新排进高频复习'
       }));
-      box.appendChild(window.DefsView.render(it.entry, {
-        showRare: S.get().settings.showRareDefs
-      }));
+      box.appendChild(window.DefsView.render(it.entry, { citeLimit: 2 }));
       box.appendChild(el('div', { class: 'card-actions' }, [
         el('button', {
           class: 'btn btn--primary btn--wide', type: 'button',

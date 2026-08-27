@@ -404,7 +404,8 @@
 
     if (open) {
       const detail = el('div', { class: 'word-detail' });
-      detail.appendChild(window.DefsView.render(entry, { showRare: true }));
+      // 词书页是「查」而不是「背」，不赶时间，真题原句全给
+      detail.appendChild(window.DefsView.render(entry, { citeLimit: 3 }));
 
       const tools = el('div', { class: 'row-tools' });
       const lvBox = el('div', { class: 'lv-switch' }, [
@@ -547,10 +548,6 @@
     }, '默认关闭 —— 按你的设定，全部分类完再开始复习。' +
        '整本词表普查要几个小时，中途想先复习已分类的部分就打开它。'));
 
-    g2.appendChild(checkField('默认展开生僻义', s.showRareDefs, function (v) {
-      s.showRareDefs = v; S.save();
-    }, '生僻义默认折叠。无论开关与否，选择题的答案和干扰项都不会用生僻义。'));
-
     g2.appendChild(checkField('翻面时自动朗读', s.autoSpeak, function (v) {
       s.autoSpeak = v; S.save();
     }, window.Speak.available() ? null : '当前浏览器不支持语音合成，这个开关不会生效。'));
@@ -612,15 +609,42 @@
     if (meta.hasFreq) {
       g5.appendChild(el('p', { class: 'field-note field-note--warn', text:
         '词头显示的「真题 N 次」是单词级的：它说明这个词在约 200 套真题里出现过多少次，' +
-        '【不区分】用的是哪个义项。判断「哪个义项常考」需要真题原文逐句统计，目前还没有语料，' +
-        '所以义项旁不会标★。等你拿到真题文本，这个标注可以补上。' }));
+        '【不区分】用的是哪个义项。想知道某个义项到底怎么考，看卡片上的「真题原句」。' }));
     }
     if (meta.demo) {
       g5.appendChild(el('p', { class: 'field-note field-note--warn', text:
-        '这是示例词库，其中的「★ 真题 N 次」是演示用的假数据，不是真实统计结果，' +
-        '不要据此判断哪个义项常考。词条本身（拼写、音标、释义）是准确的。' }));
+        '这是示例词库，其中的标注是演示用的假数据，不是真实统计结果。' +
+        '词条本身（拼写、音标、释义）是准确的。' }));
     }
     box.appendChild(g5);
+
+    /* --- 真题语料 --- */
+    const cm = window.WB.corpusMeta();
+    const g6 = group('真题语料');
+    if (cm) {
+      g6.appendChild(el('dl', { class: 'meta-list' }, [
+        el('dt', { text: '来源' }),   el('dd', { text: cm.name }),
+        el('dt', { text: '年份' }),   el('dd', { text: cm.years }),
+        el('dt', { text: '篇目' }),   el('dd', { text: cm.texts + ' 篇' }),
+        el('dt', { text: '收录句' }), el('dd', { text: fmtNum(cm.sents) + ' 句' }),
+        el('dt', { text: '覆盖词' }), el('dd', { text: fmtNum(cm.words) + ' 个' })
+      ]));
+      /* 这段必须留着。「真题原句」很容易被读成「这个义项的出处」，
+         而它只是词条级的 —— 事先说清边界，比事后解释便宜得多。 */
+      g6.appendChild(el('p', { class: 'field-note field-note--warn', text:
+        '「真题原句」是【词条级】的：只保证这句话里有这个词，' +
+        '不保证句中用的是你正在看的那个义项。' +
+        '判断某一句用的是哪个义需要逐句做词义消歧，判错了比不标更误导人 —— ' +
+        '所以这里只把原句原样摆出来，由你自己看。' }));
+      g6.appendChild(el('p', { class: 'field-note', text:
+        '高频词覆盖得最全：真题出现 200 次以上的词有 99.5% 配到了原句。' +
+        '低频词配不到很正常 —— 这份语料只含历年阅读和翻译，不含完形、写作。' }));
+    } else {
+      g6.appendChild(el('p', { class: 'field-note', text:
+        '没有加载到 data/corpus.js，卡片上不会出现「真题原句」。' +
+        '需要的话在项目目录跑 node tools/build-corpus.js 生成。' }));
+    }
+    box.appendChild(g6);
 
     return box;
   }

@@ -53,5 +53,10 @@ console.log('=== 不变量检查（应全部为 0）===');
 console.log('无释义词条        :', noDef);
 console.log('空释义文本        :', emptyText);
 console.log('重复单词          :', dupWords);
-console.log('义项带 tag        :', senseTagged, '  <- 必须为 0：没有真题语料就不做义项级分级');
-console.log('义项带 count      :', senseCounted, '  <- 必须为 0：单词级词频绝不能写进义项级字段');
+console.log('义项带 tag        :', senseTagged,
+            '  <- 必须为 0：义项级分级需要逐句词义消歧，判错比不标更误导人，所以不做');
+console.log('义项带 count      :', senseCounted,
+            '  <- 必须为 0：单词级词频绝不能写进义项级字段');
+console.log('');
+console.log('真题原句是【词条级】的，存在 data/corpus.js，由 tools/build-corpus.js 生成 ——');
+console.log('它只保证「这句话里有这个词」，不声称哪个义项常考，所以不碰上面这两个字段。');
