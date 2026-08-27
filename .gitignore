@@ -20,6 +20,12 @@ KaoYan_3.json/
 # 真题语料仓库（目前是个空 clone，工作区没 checkout 出来）
 真题语料/
 
+# docs/ —— 之前误把整个项目连同 .git 一起拷进 docs/ 当发布目录，
+# 结果 git 把它记成「子模块指针（gitlink）」，里面的文件一个都没进仓库，
+# 还导致 Pages 构建失败。真正的发布内容就在根目录，
+# 这个拷贝已经没用，以后 git add . 也不会再捡到它。
+docs/
+
 # 个人备份文件，别手滑传上去
 vocab-backup-*.json
 
