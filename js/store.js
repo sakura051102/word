@@ -25,7 +25,10 @@ window.Store = (function () {
       autoSpeak: true,                // 翻面自动朗读
       reviewBeforeTriageDone: false,  // 允许普查未完成就开始复习
       quizRatio: 0.5,                 // 选择题占比
-      theme: 'auto'                   // auto | light | dark
+      theme: 'auto',                  // auto | light | dark
+      examDate: null,                 // 考试日期 'YYYY-MM-DD'，null = 未设置
+      autoPace: true,                 // 按考试日期动态算每日新词量
+      skipL3Patrol: false             // 熟词不参与巡检（用户认为熟词基本不用过）
     },
     triage: { cursor: 0 },            // 普查游标（词表下标）
     cards: {},                        // word -> card

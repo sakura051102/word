@@ -572,6 +572,73 @@ check('设置页不再有「默认展开生僻义」这个假开关',
 check('设置页出现「真题语料」信息组',
       queryAll(main, '.set-title').some(function (n) { return n.textContent.indexOf('真题语料') >= 0; }));
 
+/* ---------------------------------------------------------------- 冲刺面板 */
+
+section('冲刺面板 + 自动节奏 + 跳过巡检');
+
+/* 造一个干净、可预测的存档：reset 后手工铺卡片。
+   30 个 L1（已学 active、reps=0），20 个 L2（active、reps=1），
+   10 个 L3（未 active，模拟普查完但还没排期的熟词）。 */
+S.reset();
+const st2 = S.get();
+const defWords = win.WB.all();
+
+function mkCard(lv, reps, active) {
+  const c = win.Engine.createCard(lv);
+  c.active = active;
+  c.reps = reps;
+  if (active) {
+    c.interval = lv === 1 ? 1 : 3;
+    c.due = S.today();
+  }
+  return c;
+}
+for (let i = 0; i < 30; i++) st2.cards[defWords[i].word] = mkCard(1, 0, true);
+for (let i = 30; i < 50; i++) st2.cards[defWords[i].word] = mkCard(2, 1, true);
+for (let i = 50; i < 60; i++) st2.cards[defWords[i].word] = mkCard(3, 0, false);
+st2.settings.examDate = S.addDays(S.today(), 100);
+st2.settings.autoPace = true;
+st2.settings.skipL3Patrol = true;
+st2.settings.reviewBeforeTriageDone = true;   // 让首页显示「开始复习」入口
+S.save();
+
+/* 回首页看冲刺面板 */
+queryAll(nav, '.tab')[0].click();
+check('首页出现冲刺面板', queryAll(main, '.sprint').length === 1);
+const sTitle = queryAll(main, '.sprint-title')[0];
+check('  倒计时显示「距考研」', !!sTitle && sTitle.textContent.indexOf('距考研') >= 0,
+      sTitle ? sTitle.textContent : '没找到 .sprint-title');
+
+/* 轮次进度：50 个 active，其中 20 个 reps>=1 → 第1轮 50，第2轮 20，第3轮 0 */
+const rNums = queryAll(main, '.sprint-round-num').map(function (n) { return n.textContent; });
+check('  轮次数字正确（50 已学 / 20 复习1次 / 0 复习2次）',
+      rNums[0] === '50 / 50' && rNums[1] === '20 / 50' && rNums[2] === '0 / 50',
+      rNums.join(' | '));
+
+/* 每日目标：50 个未学？不对 —— 全部已学，remaining=0，目标应为 0 */
+const sSub = queryAll(main, '.sprint-sub')[0];
+check('  全部已学时每日目标为 0', !!sSub && sSub.textContent.indexOf('0 词') >= 0,
+      sSub ? sSub.textContent : '没找到 .sprint-sub');
+
+/* skipL3Patrol：进入复习，L3 词不应被 activate */
+const l3word = defWords[55].word;
+const wasInactive = st2.cards[l3word].active === false;
+queryAll(main, '.action-card .btn').filter(function (b) {
+  return b.textContent.indexOf('复习') >= 0;
+})[0].click();
+check('  skipL3Patrol 时 L3 词保持未激活', wasInactive && st2.cards[l3word].active === false,
+      'L3 词被意外激活了');
+
+/* 自动节奏：effectiveLimit 应随剩余词数动态变化，这里 0 个未学 → 上限 0 */
+check('  自动节奏下无未学词时新词上限为 0', win.Review.status().budget === 0,
+      'budget=' + win.Review.status().budget);
+
+/* 恢复默认设置，避免污染后续（本测试是最后一段，其实无所谓，但保持干净） */
+st2.settings.examDate = null;
+st2.settings.autoPace = true;
+st2.settings.skipL3Patrol = false;
+S.save();
+
 /* ---------------------------------------------------------------- 结果 */
 
 console.log('\n' + '='.repeat(46));

@@ -136,6 +136,93 @@
     ]);
   }
 
+  /* ================================================================ 冲刺面板 */
+
+  /*
+   * 轮次进度。
+   *
+   * 间隔重复的一个词，从学到考前会被复习多次。这里把「复习次数」
+   * 映射成用户能理解的「轮次」：
+   *   第 1 轮 = 已学（active，进入过复习循环）
+   *   第 2 轮 = 成功复习过 1 次（reps >= 1）
+   *   第 3 轮 = 成功复习过 2 次（reps >= 2）
+   *
+   * 分母是 L1+L2（真正的待背池），不含 L3 熟词 —— 熟词不参与「过两轮」目标。
+   */
+  function roundProgress(cards) {
+    const rounds = [0, 0, 0];
+    Object.keys(cards).forEach(function (w) {
+      const c = cards[w];
+      if (!c || !c.active) return;
+      const reps = c.reps || 0;
+      rounds[0]++;
+      if (reps >= 1) rounds[1]++;
+      if (reps >= 2) rounds[2]++;
+    });
+    return rounds;
+  }
+
+  /*
+   * 冲刺面板：倒计时 + 每日目标 + 轮次进度。
+   * 只在设置了考试日期、且普查已建档(L1+L2>0)时显示。
+   */
+  function sprintPanel() {
+    const st = S.get();
+    const examDate = st.settings.examDate;
+    if (!examDate) return null;
+
+    const cards  = st.cards;
+    const counts = E.levelCounts(cards);
+    const total  = counts[0] + counts[1];     // L1 + L2
+    if (total === 0) return null;
+
+    const daysLeft  = S.daysBetween(S.today(), examDate);
+    const rounds    = roundProgress(cards);
+    const remaining = Math.max(0, total - rounds[0]);           // 还没学的
+    const effDays   = Math.max(1, daysLeft - 10);               // 留 10 天缓冲
+    const target    = Math.max(0, Math.ceil(remaining / effDays));
+
+    const box = el('div', { class: 'sprint' });
+
+    /* --- 头部：倒计时 + 目标 --- */
+    box.appendChild(el('div', { class: 'sprint-head' }, [
+      el('div', { class: 'sprint-count' }, [
+        el('b', { text: daysLeft > 0 ? String(daysLeft) : '!' }),
+        el('small', { text: daysLeft > 0 ? '天' : '考试' })
+      ]),
+      el('div', { class: 'sprint-meta' }, [
+        el('div', { class: 'sprint-title', text: daysLeft > 0 ? '距考研' : '今天考试' }),
+        el('div', { class: 'sprint-sub', text:
+          daysLeft > 0
+            ? '待背 ' + fmtNum(remaining) + ' 词 · 每日目标约 ' + fmtNum(target) + ' 词'
+            : '加油' })
+      ])
+    ]));
+
+    /* --- 轮次进度条 --- */
+    const rows = [
+      { label: '第 1 轮 · 已学',         n: rounds[0] },
+      { label: '第 2 轮 · 已复习 1 次',   n: rounds[1] },
+      { label: '第 3 轮 · 已复习 2 次',   n: rounds[2] }
+    ];
+    const body = el('div', { class: 'sprint-rounds' });
+    rows.forEach(function (r) {
+      const pct = total ? Math.min(100, r.n / total * 100) : 0;
+      body.appendChild(el('div', { class: 'sprint-round' }, [
+        el('div', { class: 'sprint-round-top' }, [
+          el('span', { class: 'sprint-round-label', text: r.label }),
+          el('span', { class: 'sprint-round-num', text: fmtNum(r.n) + ' / ' + fmtNum(total) })
+        ]),
+        el('div', { class: 'progress' }, [
+          el('div', { class: 'progress-fill', style: 'width:' + pct.toFixed(1) + '%' })
+        ])
+      ]));
+    });
+    box.appendChild(body);
+
+    return box;
+  }
+
   /* ================================================================ 今日页 */
 
   function pageHome() {
@@ -147,6 +234,10 @@
 
     /* --- 玩家状态条：等级 + 经验 --- */
     box.appendChild(expBar());
+
+    /* --- 冲刺面板：倒计时 + 每日目标 + 轮次进度（设了考试日期才显示）--- */
+    const sprint = sprintPanel();
+    if (sprint) box.appendChild(sprint);
 
     /* --- 主行动区 --- */
     if (!tri.complete) {
@@ -526,9 +617,28 @@
 
     /* --- 学习节奏 --- */
     const g1 = group('学习节奏');
+
+    /* 考试日期：设了它，「冲刺面板」和「自动节奏」才生效 */
+    const dateInput = el('input', {
+      class: 'input input--date', type: 'date', value: s.examDate || ''
+    });
+    dateInput.addEventListener('change', function () {
+      s.examDate = dateInput.value || null;
+      S.save();
+      window.UI.toast(s.examDate ? '已设置考试日期' : '已取消考试日期', 'info');
+    });
+    g1.appendChild(field('考试日期', dateInput,
+      '填考研当天。首页会出现倒计时和每日目标，帮你把剩下的词卡在考前过完。'));
+
+    g1.appendChild(checkField('按考试日期自动调整每日新词量', s.autoPace, function (v) {
+      s.autoPace = v; S.save();
+    }, '开启后忽略下面的「每日新词上限」，改为按「剩余词数 ÷ 剩余天数」动态算，' +
+       '考前自动留 10 天纯复习。'));
+
     g1.appendChild(numberField('每日新词上限', s.dailyNew, 0, 500, function (v) {
       s.dailyNew = v; S.save();
-    }, '每天最多投放多少个没学过的词。到期复习的词不受这个限制。'));
+    }, '每天最多投放多少个没学过的词。到期复习的词不受这个限制。' +
+       '（开启自动节奏后此项失效）'));
 
     g1.appendChild(quotaField(s));
 
@@ -551,6 +661,11 @@
     g2.appendChild(checkField('翻面时自动朗读', s.autoSpeak, function (v) {
       s.autoSpeak = v; S.save();
     }, window.Speak.available() ? null : '当前浏览器不支持语音合成，这个开关不会生效。'));
+
+    g2.appendChild(checkField('熟词不参与巡检', s.skipL3Patrol, function (v) {
+      s.skipL3Patrol = v; S.save();
+    }, '开启后熟词彻底不进复习、不占任何时间。' +
+       '代价是「自以为会、其实不会」的熟词不会被抓出来，只在答错降级时回来。'));
     box.appendChild(g2);
 
     /* --- 外观 --- */

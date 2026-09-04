@@ -49,6 +49,28 @@ window.Review = (function () {
 
   /* ---------------------------------------------------------------- 建队列 */
 
+  /*
+   * 当天新词上限。
+   *
+   * 两种来源：
+   *   1. 手动 dailyNew（默认）
+   *   2. 自动节奏 —— 设了考试日期且开启 autoPace 时，按
+   *      「剩余未学 L1+L2 ÷ 剩余有效天数」动态算，保证考前把 2400 个都投完。
+   *      留 10 天考前缓冲：那几天只复习不学新词。
+   *
+   * buildQueue 和 status 都走这里，保证「首页显示的新词数」和
+   * 「实际投放的新词数」永远一致，不会出现两个数字打架。
+   */
+  function effectiveLimit(st, remainingL12) {
+    if (st.settings.autoPace && st.settings.examDate) {
+      const daysLeft = S.daysBetween(S.today(), st.settings.examDate);
+      if (daysLeft > 0) {
+        return Math.max(0, Math.ceil(remainingL12 / Math.max(1, daysLeft - 10)));
+      }
+    }
+    return Math.max(0, st.settings.dailyNew | 0);
+  }
+
   function buildQueue() {
     const st    = S.get();
     const cards = st.cards;
@@ -79,7 +101,7 @@ window.Review = (function () {
     });
 
     /* 新投放预算：今日上限减去今天已投放的 */
-    const limit  = Math.max(0, st.settings.dailyNew | 0);
+    const limit  = effectiveLimit(st, freshByLevel[0].length + freshByLevel[1].length);
     const used   = S.getDaily().new || 0;
     const budget = Math.max(0, limit - used);
 
@@ -100,8 +122,13 @@ window.Review = (function () {
      * 改为一次性全部排期，把首次巡检日均摊到未来一段时间里。
      * 窗口按数量自适应（约每天 20 个，下限 20 天、上限 120 天）：
      * 两千个熟词摊到 100 天 = 每天 20 个巡检，两三分钟的事。
+     *
+     * 【跳过巡检】用户明确「熟词基本不需要过」——开启 skipL3Patrol 后，
+     * 熟词保持 active=false，彻底不进复习，也不占任何时间。
+     * 代价是「自以为会、其实不会」的熟词不会被抓出来，直到哪天它因为
+     * 别的词降级或被手动改类才重新出现。这是用户的明确取舍。
      */
-    const l3Words = freshByLevel[2];
+    const l3Words = st.settings.skipL3Patrol ? [] : freshByLevel[2];
     let l3Scheduled = 0;
     if (l3Words.length) {
       const n   = l3Words.length;
@@ -854,7 +881,7 @@ window.Review = (function () {
       else if (c.level >= 1 && c.level <= 3) freshAvail[c.level - 1]++;
     });
 
-    const limit  = Math.max(0, st.settings.dailyNew | 0);
+    const limit  = effectiveLimit(st, freshAvail[0] + freshAvail[1]);
     const used   = S.getDaily().new || 0;
     const budget = Math.max(0, limit - used);
     /* 配额只分给 L1/L2 —— L3 不占新词额度，进复习页时会一次性排期 */
@@ -862,7 +889,9 @@ window.Review = (function () {
 
     return {
       due: due,
-      newL1: alloc[0], newL2: alloc[1], newL3: freshAvail[2],
+      newL1: alloc[0], newL2: alloc[1],
+      /* 跳过巡检时熟词不再排期，别在首页显示「还有 N 个熟词待排期」误导人 */
+      newL3: st.settings.skipL3Patrol ? 0 : freshAvail[2],
       newToStudy: alloc[0] + alloc[1],
       totalToday: due + alloc[0] + alloc[1],
       unlearned: freshAvail[0] + freshAvail[1] + freshAvail[2],

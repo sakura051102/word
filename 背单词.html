@@ -502,6 +502,45 @@ nav.tabs.is-dim { opacity: .45; }
 }
 .exp-top .exp-num { margin-left: auto; font-family: var(--font-num); color: var(--text-muted); font-size: .8rem; }
 
+/* ------------------------------------------------------------------ 冲刺面板 */
+
+/* 考试倒计时 + 每日目标 + 轮次进度。这是「确定性」的核心 ——
+   让用户一眼看到：还差多少词、每天该背几个、复习到第几轮了。 */
+.sprint {
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  background: var(--surface-1);
+  -webkit-backdrop-filter: var(--glass); backdrop-filter: var(--glass);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  position: relative; overflow: hidden;
+}
+.sprint::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--neon-pink), var(--series-1), transparent);
+  opacity: .8;
+}
+.sprint-head { display: flex; align-items: center; gap: 14px; }
+.sprint-count {
+  flex-shrink: 0; width: 58px; height: 58px; border-radius: 16px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: linear-gradient(140deg, var(--neon-pink), var(--neon-violet));
+  color: var(--on-primary); box-shadow: var(--glow);
+}
+.sprint-count b { font-family: var(--font-num); font-size: 1.5rem; line-height: 1; }
+.sprint-count small { font-size: .56rem; letter-spacing: .12em; opacity: .85; }
+.sprint-meta { flex: 1; min-width: 0; }
+.sprint-title { font-weight: 700; font-size: 1.02rem; }
+.sprint-sub { color: var(--text-secondary); font-size: .84rem; margin-top: 2px; }
+.sprint-rounds { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.sprint-round-top {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: .8rem; margin-bottom: 4px;
+}
+.sprint-round-label { color: var(--text-secondary); }
+.sprint-round-num { margin-left: auto; font-family: var(--font-num); color: var(--text-muted); font-size: .78rem; }
+
+
 /* 复习页顶栏的常驻连击计数。弹出的大数字一闪而过，
    这里能随时瞄一眼自己连到第几个了。 */
 .combo-chip {
