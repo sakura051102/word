@@ -613,11 +613,11 @@ const sTitle = queryAll(main, '.sprint-title')[0];
 check('  倒计时显示「距考研」', !!sTitle && sTitle.textContent.indexOf('距考研') >= 0,
       sTitle ? sTitle.textContent : '没找到 .sprint-title');
 
-/* 轮次进度：L1/L2 active 50 个，其中 20 个 reps>=1 → 第1轮 50，第2轮 20，第3轮 0。
+/* 进度：L1/L2 active 50 个，其中 20 个 reps>=1 → 已学 50，复习巩固 20。
    分母是 L1/L2 之和 = 50。5 个已激活的 L3 不能混进来 —— 否则会变 55/50。 */
 const rNums = queryAll(main, '.sprint-round-num').map(function (n) { return n.textContent; });
-check('  轮次数字正确（50 已学 / 20 复习1次 / 0 复习2次，不含 L3）',
-      rNums[0] === '50 / 50' && rNums[1] === '20 / 50' && rNums[2] === '0 / 50',
+check('  进度数字正确（50 已学一遍 / 20 已复习巩固，不含 L3）',
+      rNums[0] === '50 / 50' && rNums[1] === '20 / 50',
       rNums.join(' | '));
 
 /* 冲刺模式首页不应显示 LV 经验条（避免「累计 N 次」和词数进度混淆） */
@@ -647,6 +647,52 @@ st2.settings.examDate = null;
 st2.settings.autoPace = true;
 st2.settings.skipL3Patrol = false;
 S.save();
+
+/* ---------------------------------------------------------------- 再加量 */
+
+section('「今天再多放 20 个」在自动节奏下要生效');
+
+/* autoPace 场景：100 个 L1 未学，考试 100 天后。
+   effectiveLimit = ceil(100 / 90) = 2（留 10 天缓冲）。 */
+S.reset();
+const st3 = S.get();
+for (let i = 0; i < 100; i++) st3.cards[win.WB.at(i).word] = win.Engine.createCard(1);
+st3.settings.examDate = S.addDays(S.today(), 100);
+st3.settings.autoPace = true;
+st3.settings.reviewBeforeTriageDone = true;
+S.save();
+
+check('  autoPace: 100 未学 / 90 有效天 → 上限 2', win.Review.status().limit === 2,
+      'limit=' + win.Review.status().limit);
+
+/* 点「再多放 20」→ daily[今天].extraNew +20 → 上限 22 */
+S.bump('extraNew', 20);
+const st3b = win.Review.status();
+check('  autoPace: 再多放 20 后上限 22', st3b.limit === 22, 'limit=' + st3b.limit);
+check('  autoPace: budget = 22 - 0 = 22（能进学习界面）', st3b.budget === 22,
+      'budget=' + st3b.budget);
+
+/* 手动模式（无 examDate）同样走 extraNew */
+st3.settings.examDate = null;
+st3.settings.autoPace = false;
+st3.settings.dailyNew = 30;
+S.reset();   // extraNew 已在 daily 里，reset 清掉；重造 100 个未学
+for (let i = 0; i < 100; i++) S.get().cards[win.WB.at(i).word] = win.Engine.createCard(1);
+S.save();
+S.bump('extraNew', 15);
+check('  手动模式: 上限 30 + 再多放 15 = 45', win.Review.status().limit === 45,
+      'limit=' + win.Review.status().limit);
+
+/* 清掉 extraNew（模拟跨天），上限回落 */
+S.reset();
+for (let i = 0; i < 100; i++) S.get().cards[win.WB.at(i).word] = win.Engine.createCard(1);
+S.get().settings.dailyNew = 30;
+S.save();
+check('  extraNew 是当天性的：跨天后回落回 30', win.Review.status().limit === 30,
+      'limit=' + win.Review.status().limit);
+
+/* 还原，避免污染统计页测试环境 */
+S.reset();
 
 /* ---------------------------------------------------------------- 结果 */
 

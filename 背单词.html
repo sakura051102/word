@@ -538,7 +538,15 @@ nav.tabs.is-dim { opacity: .45; }
   font-size: .8rem; margin-bottom: 4px;
 }
 .sprint-round-label { color: var(--text-secondary); }
+/* 主进度（已学一遍·覆盖）的标签更醒目 —— 它是考前要推满的那条 */
+.sprint-round--main .sprint-round-label { color: var(--text-primary); font-weight: 650; }
+.sprint-round--main .progress { height: 10px; }
 .sprint-round-num { margin-left: auto; font-family: var(--font-num); color: var(--text-muted); font-size: .78rem; }
+.sprint-note {
+  margin: 10px 0 0; font-size: .76rem; line-height: 1.6;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border); padding-top: 9px;
+}
 
 
 /* 复习页顶栏的常驻连击计数。弹出的大数字一闪而过，

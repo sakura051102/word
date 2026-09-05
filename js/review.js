@@ -62,13 +62,21 @@ window.Review = (function () {
    * 「实际投放的新词数」永远一致，不会出现两个数字打架。
    */
   function effectiveLimit(st, remainingL12) {
+    let base;
     if (st.settings.autoPace && st.settings.examDate) {
       const daysLeft = S.daysBetween(S.today(), st.settings.examDate);
       if (daysLeft > 0) {
-        return Math.max(0, Math.ceil(remainingL12 / Math.max(1, daysLeft - 10)));
+        base = Math.max(0, Math.ceil(remainingL12 / Math.max(1, daysLeft - 10)));
+      } else {
+        base = Math.max(0, st.settings.dailyNew | 0);
       }
+    } else {
+      base = Math.max(0, st.settings.dailyNew | 0);
     }
-    return Math.max(0, st.settings.dailyNew | 0);
+    /* 「今天再多放 N 个」是当天一次性加量：记在 daily[今天].extraNew，
+       不常驻改 dailyNew —— 否则 autoPace 会被手动加量顶掉，明天节奏就乱了。 */
+    const extra = S.getDaily().extraNew || 0;
+    return base + extra;
   }
 
   function buildQueue() {
@@ -249,11 +257,13 @@ window.Review = (function () {
     };
   }
 
-  /* 临时把今日新词上限往上抬，用于「今天还想多背点」的情况 */
+  /* 临时把今日新词上限往上抬，用于「今天还想多背点」的情况。
+     走 daily[今天].extraNew 而不是常驻改 dailyNew：
+     autoPace 下 dailyNew 是摆设（effectiveLimit 只看考试日期），
+     之前直接改 dailyNew 导致「再多放 20 个」点了没反应。
+     一次性加量只影响今天，明天自动恢复计划量。 */
   function raiseLimit(n) {
-    const s = S.get().settings;
-    s.dailyNew = Math.min(500, (s.dailyNew | 0) + n);
-    S.save();
+    S.bump('extraNew', n);
     sess = newSession();
     prepare();
     render();

@@ -203,16 +203,20 @@
       ])
     ]));
 
-    /* --- 轮次进度条 --- */
+    /* --- 进度 ---
+       「已学一遍」= 每个词第一次进入学习。覆盖进度，0→100% 对应词表全部学完，
+       这是你考前要推满的主进度。
+       「已复习巩固」= 其中答对过、已进入间隔复习的词。间隔重复里每个词独立排期：
+       当天学的新词只要答对一次，就已完成「复习巩固」这一步 ——
+       所以这项会随学习同步增长，第一天就有数字是正常的，不是「第二轮提前开始」。 */
     const rows = [
-      { label: '第 1 轮 · 已学',         n: rounds[0] },
-      { label: '第 2 轮 · 已复习 1 次',   n: rounds[1] },
-      { label: '第 3 轮 · 已复习 2 次',   n: rounds[2] }
+      { label: '已学一遍 · 覆盖',   n: rounds[0], strong: true },
+      { label: '已复习巩固 · 答对过', n: rounds[1] }
     ];
     const body = el('div', { class: 'sprint-rounds' });
     rows.forEach(function (r) {
       const pct = total ? Math.min(100, r.n / total * 100) : 0;
-      body.appendChild(el('div', { class: 'sprint-round' }, [
+      body.appendChild(el('div', { class: 'sprint-round' + (r.strong ? ' sprint-round--main' : '') }, [
         el('div', { class: 'sprint-round-top' }, [
           el('span', { class: 'sprint-round-label', text: r.label }),
           el('span', { class: 'sprint-round-num', text: fmtNum(r.n) + ' / ' + fmtNum(total) })
@@ -223,6 +227,9 @@
       ]));
     });
     box.appendChild(body);
+
+    box.appendChild(el('p', { class: 'sprint-note', text:
+      '答对即计入复习：今天学的新词只要答对，隔几天会自动回来复习 —— 不用你手动安排第二轮。' }));
 
     return box;
   }
