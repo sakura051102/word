@@ -1,0 +1,159 @@
+/* ===========================================================================
+ *  tools/test-store.js —— 存储层数据安全断言（落盘轮换 / 损坏回滚 / 迁移 / 备份提醒）
+ * ---------------------------------------------------------------------------
+ *  用可控的内存 localStorage 桩把 store.js 加载进 vm，主动制造「主档写坏」
+ *  「备份缺失」等故障，验证不会白屏、不会静默丢档。
+ *
+ *  运行： node tools/test-store.js（也由 run-all-tests.js / npm test 串起）
+ * =========================================================================== */
+
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const ROOT = path.join(__dirname, '..');
+
+let pass = 0, fail = 0;
+function check(name, cond, extra) {
+  if (cond) { pass++; console.log('  ✓ ' + name); }
+  else { fail++; console.log('  ✗ ' + name + (extra ? '  → ' + extra : '')); }
+}
+function section(t) { console.log('\n=== ' + t + ' ==='); }
+
+/* 每次用全新的内存存储 + 同步 setTimeout，构建一个独立 Store 单例环境 */
+function freshStore(initial) {
+  const mem = Object.assign({}, initial || {});
+  const sandbox = {
+    // 故障路径本就会 console.warn/error，已由断言覆盖，测试输出里不再打印堆栈
+    console: { log: console.log.bind(console), warn: function () {}, error: function () {} },
+    // 同步执行，让节流写入在测试里立即落盘，结果确定、不用 sleep
+    setTimeout: function (fn) { fn(); return 0; },
+    clearTimeout: function () {},
+    addEventListener: function () {},
+    CustomEvent: function (t, o) { return Object.assign({ type: t }, o); },
+    document: { addEventListener: function () {}, visibilityState: 'visible' },
+    localStorage: {
+      getItem: function (k) { return (k in mem) ? mem[k] : null; },
+      setItem: function (k, v) { mem[k] = String(v); },
+      removeItem: function (k) { delete mem[k]; }
+    }
+  };
+  sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', 'store.js'), 'utf8'),
+                  sandbox, { filename: 'store.js' });
+  return { S: sandbox.Store, mem: sandbox.localStorage, raw: mem };
+}
+
+/* ====================================================== 1. 落盘轮换备份 */
+
+section('落盘轮换：每次写入把上一代主档挪为备份');
+
+(function () {
+  const env = freshStore();
+  env.S.load();
+  env.S.setCard('alpha', { level: 1 });
+  env.S.setCard('beta', { level: 2 });              // 同步桩下立即落盘
+  const main = JSON.parse(env.mem.getItem(env.S.KEY));
+  check('新主档含 alpha + beta', !!main.cards.alpha && !!main.cards.beta);
+  const backup = env.mem.getItem(env.S.BACKUP_KEY);
+  check('备份键存在上一版', !!backup);
+  const bk = backup ? JSON.parse(backup) : {};
+  check('备份只含上一代的 alpha（不含刚写的 beta）',
+        !!bk.cards.alpha && !bk.cards.beta,
+        'alpha=' + !!bk.cards.alpha + ' beta=' + !!bk.cards.beta);
+})();
+
+/* ====================================================== 2. 主档损坏→回滚 */
+
+section('主档损坏：自动回滚到上一版备份并给出提示');
+
+(function () {
+  const goodBackup = JSON.stringify({
+    version: 1, cards: { saved: { level: 2 } }, settings: {}, triage: { cursor: 9 }
+  });
+  const env = freshStore({
+    kaoyan_vocab_v1: '{这是被截断写坏的主档,,,',
+    kaoyan_vocab_v1_backup: goodBackup
+  });
+  const st = env.S.load();
+  check('回滚后取回备份里的卡', !!st.cards.saved);
+  const n = env.S.consumeNotice();
+  check('给出 recovered 提示', n && n.type === 'recovered', JSON.stringify(n));
+  const corruptKeys = Object.keys(env.raw).filter(function (k) {
+    return k.indexOf('kaoyan_vocab_v1_corrupt_') === 0;
+  });
+  check('损坏原文被隔离到 *_corrupt_* 键（没被覆盖）', corruptKeys.length === 1,
+        'corrupt keys=' + corruptKeys.length);
+  check('提示只消费一次', env.S.consumeNotice() === null);
+})();
+
+/* ============================================ 3. 主档损坏且无备份→空档 */
+
+section('主档损坏且无备份：安全空档，不抛异常');
+
+(function () {
+  const env = freshStore({ kaoyan_vocab_v1: 'not-json{{' });
+  const st = env.S.load();
+  check('回落到空存档', st && Object.keys(st.cards).length === 0);
+  const n = env.S.consumeNotice();
+  check('给出 corrupt 提示', n && n.type === 'corrupt');
+})();
+
+section('主档与备份都损坏：同样安全空档');
+
+(function () {
+  const env = freshStore({
+    kaoyan_vocab_v1: 'bad1', kaoyan_vocab_v1_backup: 'bad2'
+  });
+  const st = env.S.load();
+  check('双损坏仍能拿到空存档', st && Object.keys(st.cards).length === 0);
+  const n = env.S.consumeNotice();
+  check('给出 corrupt 提示', n && n.type === 'corrupt');
+})();
+
+/* ====================================================== 4. 老存档补字段 */
+
+section('向前兼容：老存档缺字段由默认值补齐');
+
+(function () {
+  const env = freshStore({ kaoyan_vocab_v1: JSON.stringify({
+    version: 1, cards: { x: { level: 1 } }   // 缺 settings/triage/daily/新字段
+  }) });
+  const st = env.S.load();
+  check('settings 补齐', st.settings && st.settings.dailyNew === 30);
+  check('新增的 lastExportAt 补齐为 null', st.lastExportAt === null);
+  check('triage 补齐', st.triage && st.triage.cursor === 0);
+  check('version 归一到当前版本', st.version === env.S.CURRENT_VERSION);
+})();
+
+/* ====================================================== 5. 备份提醒阈值 */
+
+section('备份提醒：500 词 / 7 天阈值');
+
+(function () {
+  const env = freshStore();
+  env.S.load();
+  const st = env.S.get();
+  // 从未导出且不足 500 → 不提醒
+  for (let i = 0; i < 100; i++) st.cards['w' + i] = { level: 1 };
+  check('未导出且 100 词：ok', env.S.backupAdvice().level === 'ok');
+  // 凑到 500 → 提醒
+  for (let i = 100; i < 500; i++) st.cards['w' + i] = { level: 1 };
+  check('未导出且满 500 词：warn', env.S.backupAdvice().level === 'warn');
+  // 刚导出 → 解除
+  env.S.markExported();
+  const a = env.S.backupAdvice();
+  check('导出后恢复 ok', a.level === 'ok' && a.lastExportAt === env.S.today());
+  // 模拟 8 天前导出 → 提醒
+  st.lastExportAt = env.S.addDays(env.S.today(), -8);
+  check('距上次导出 8 天：warn', env.S.backupAdvice().level === 'warn');
+  // 6 天前 → 不提醒
+  st.lastExportAt = env.S.addDays(env.S.today(), -6);
+  check('距上次导出 6 天：ok', env.S.backupAdvice().level === 'ok');
+})();
+
+/* ------------------------------------------------------------- 结果 */
+
+console.log('\n' + '='.repeat(46));
+console.log('存储单测：通过 ' + pass + ' 项，失败 ' + fail + ' 项');
+process.exit(fail ? 1 : 0);

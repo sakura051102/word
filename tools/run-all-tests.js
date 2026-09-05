@@ -7,6 +7,7 @@
  *    3) smoke-test.js --reduced  主流程冒烟（系统开启「减少动态效果」）
  *    4) verify-wordbook.js       词库不变量
  *    5) test-engine.js           间隔重复引擎边界断言
+ *    6) test-store.js            存储层数据安全断言（备份/回滚/迁移/提醒）
  *
  *  任一步骤失败立即以非零码退出，便于 CI / 提交前自查。
  *  运行： node tools/run-all-tests.js   或   npm test
@@ -37,7 +38,7 @@ function heading(t) {
 
 /* 1) 语法检查 —— 文件逐个 check，收集所有失败而不是第一个就停 ---------------- */
 
-heading('1/5 语法检查 node --check（全部 .js）');
+heading('1/6 语法检查 node --check（全部 .js）');
 const files = [];
 ['js', 'tools', 'data'].forEach(function (d) {
   const p = path.join(ROOT, d);
@@ -60,7 +61,7 @@ files.forEach(function (f) {
 console.log('  共检查 ' + files.length + ' 个文件，失败 ' + syntaxFail + ' 个');
 results.push({ name: '语法检查', ok: syntaxFail === 0 });
 
-/* 2~5) 子测试，直接继承标准输出，失败时保留完整日志 ------------------------- */
+/* 2~6) 子测试，直接继承标准输出，失败时保留完整日志 ------------------------- */
 
 function runStep(label, args) {
   heading(label);
@@ -70,10 +71,11 @@ function runStep(label, args) {
   return ok;
 }
 
-runStep('2/5 主流程冒烟 smoke-test', ['tools/smoke-test.js']);
-runStep('3/5 主流程冒烟 smoke-test --reduced', ['tools/smoke-test.js', '--reduced']);
-runStep('4/5 词库不变量 verify-wordbook', ['tools/verify-wordbook.js']);
-runStep('5/5 引擎边界断言 test-engine', ['tools/test-engine.js']);
+runStep('2/6 主流程冒烟 smoke-test', ['tools/smoke-test.js']);
+runStep('3/6 主流程冒烟 smoke-test --reduced', ['tools/smoke-test.js', '--reduced']);
+runStep('4/6 词库不变量 verify-wordbook', ['tools/verify-wordbook.js']);
+runStep('5/6 引擎边界断言 test-engine', ['tools/test-engine.js']);
+runStep('6/6 存储数据安全断言 test-store', ['tools/test-store.js']);
 
 /* 汇总 -------------------------------------------------------------------- */
 

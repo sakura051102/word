@@ -15,6 +15,11 @@ window.Store = (function () {
   'use strict';
 
   const KEY = 'kaoyan_vocab_v1';
+  // 上一版主档的自动快照：每次成功写入前，把旧主档挪到这里做「落盘轮换」，
+  // 万一新主档被截断 / 写坏，加载时还能回滚到完整的上一代（见 writeNow / load）。
+  const BACKUP_KEY = KEY + '_backup';
+  // 当前存档结构版本。老存档加载时按 MIGRATIONS 逐级迁移到该版本。
+  const CURRENT_VERSION = 1;
 
   const DEFAULTS = {
     version: 1,
@@ -34,10 +39,14 @@ window.Store = (function () {
     cards: {},                        // word -> card
     daily: {},                        // YYYY-MM-DD -> 当日计数
     levelSnap: {},                    // YYYY-MM-DD -> [L1数, L2数, L3数]
-    upgradeSnooze: {}                 // word -> 该日期前不再提示升级
+    upgradeSnooze: {},                // word -> 该日期前不再提示升级
+    lastExportAt: null,               // 上次手动导出备份的日期（备份提醒用）
+    lastExportCount: 0                // 上次导出时已建档词数（增量达 500 提醒）
   };
 
   let state = null;
+  // 加载阶段产生、需要在界面启动后提示一次的消息（如「已从自动备份恢复」）
+  let notice = null;
 
   /* ---------------------------------------------------------------- 日期工具 */
 
@@ -101,6 +110,34 @@ window.Store = (function () {
     return target;
   }
 
+  /* 版本迁移表：MIGRATIONS[v] 负责把数据【从 v 版】原地升级到 v+1 版。
+     普通新增字段交给 fillDefaults 兜底即可，这里只放需要改结构 / 重命名的硬迁移，
+     保证几年前的老存档也能一级级升到 CURRENT_VERSION，而不是直接读崩。 */
+  const MIGRATIONS = {
+    // 示例（将来用）：1: function (d) { d.settings.newField = ...; delete d.oldField; }
+  };
+
+  function migrate(d) {
+    let v = Number(d.version) || 1;
+    while (v < CURRENT_VERSION) {
+      const step = MIGRATIONS[v];
+      if (step) step(d);
+      v += 1;
+    }
+    d.version = CURRENT_VERSION;
+    return d;
+  }
+
+  /** 反序列化一份存档文本：parse → 迁移 → 默认值补齐 */
+  function decode(raw) {
+    return fillDefaults(migrate(JSON.parse(raw)), DEFAULTS);
+  }
+
+  /** 把读坏的原始文本另存为带时间戳的隔离键，留给用户/开发者排查，不直接覆盖 */
+  function quarantine(raw) {
+    try { localStorage.setItem(KEY + '_corrupt_' + Date.now(), raw); } catch (e) {}
+  }
+
   function load() {
     let raw = null;
     try {
@@ -109,18 +146,50 @@ window.Store = (function () {
       // 隐私模式或磁盘配额问题 —— 退化为纯内存运行，界面另行告警
       console.warn('[store] localStorage 不可读，本次以内存模式运行', e);
     }
+
     if (raw) {
       try {
-        state = fillDefaults(JSON.parse(raw), DEFAULTS);
+        state = decode(raw);
       } catch (e) {
-        console.error('[store] 存档解析失败，已保留原始数据并以空档启动', e);
-        try { localStorage.setItem(KEY + '_corrupt_' + Date.now(), raw); } catch (e2) {}
-        state = fillDefaults({}, DEFAULTS);
+        // 主档损坏：先抢救上一版自动快照，尽量不让用户丢进度
+        let backup = null;
+        try { backup = localStorage.getItem(BACKUP_KEY); } catch (e2) {}
+
+        if (backup) {
+          try {
+            state = decode(backup);
+            quarantine(raw);
+            notice = {
+              type: 'recovered',
+              message: '主存档读取失败，已自动恢复到上一次的备份（最近一步操作可能丢失）。' +
+                       '建议尽快到「设置 → 导出备份」另存一份。'
+            };
+            console.warn('[store] 主档损坏，已回滚到自动备份', e);
+          } catch (e3) {
+            quarantine(raw);
+            state = fillDefaults({}, DEFAULTS);
+            notice = { type: 'corrupt',
+              message: '主存档和自动备份都无法读取，已以空档启动；损坏数据已单独保留，未被覆盖。' };
+            console.error('[store] 主档与备份均损坏，空档启动', e, e3);
+          }
+        } else {
+          quarantine(raw);
+          state = fillDefaults({}, DEFAULTS);
+          notice = { type: 'corrupt',
+            message: '存档读取失败，已以空档启动；损坏的原始数据已单独保留，未被覆盖。' };
+          console.error('[store] 存档解析失败，无备份，空档启动', e);
+        }
       }
     } else {
       state = fillDefaults({}, DEFAULTS);
     }
     return state;
+  }
+
+  /** 取出并清除一次性的加载提示（启动时弹一次 toast） */
+  function consumeNotice() {
+    const n = notice; notice = null;
+    return n;
   }
 
   function get() {
@@ -138,8 +207,28 @@ window.Store = (function () {
     pending = false;
     if (timer) { clearTimeout(timer); timer = null; }
     lastWrite = Date.now();
+
+    let str;
     try {
-      localStorage.setItem(KEY, JSON.stringify(state));
+      str = JSON.stringify(state);
+    } catch (e) {
+      if (!failed) {
+        failed = true;
+        console.error('[store] 序列化失败，本次未写入', e);
+      }
+      return;
+    }
+
+    try {
+      /* 落盘轮换：先把【上一代完整主档】挪为备份，再写新主档。
+         这样即便本次写入中途被截断 / 写坏（隐私模式清理、配额、异常退出），
+         BACKUP_KEY 里仍是一份完整的上一代存档，load() 可据此回滚，而不是空档。 */
+      let prev = null;
+      try { prev = localStorage.getItem(KEY); } catch (e) {}
+      if (prev) {
+        try { localStorage.setItem(BACKUP_KEY, prev); } catch (e) {}
+      }
+      localStorage.setItem(KEY, str);
       failed = false;
     } catch (e) {
       if (!failed) {
@@ -272,16 +361,62 @@ window.Store = (function () {
     return state;
   }
 
+  /* ---------------------------------------------------------------- 备份提醒 */
+
+  /** 成功导出一份备份后调用：记下日期与当时的建档词数，立即落盘 */
+  function markExported() {
+    const s = get();
+    s.lastExportAt = today();
+    s.lastExportCount = Object.keys(s.cards).length;
+    writeNow();
+    return { at: s.lastExportAt, count: s.lastExportCount };
+  }
+
+  /**
+   * 是否该提醒用户导出一份备份。两条阈值（满足其一即提醒）：
+   *   · 从未导出且已建档 ≥ 500 个词；
+   *   · 距上次导出 ≥ 7 天，或这期间又新分类 ≥ 500 个词。
+   * 返回 {level:'ok'|'warn', reason, lastExportAt, lastExportCount, count}。
+   */
+  const EXPORT_DAYS = 7, EXPORT_WORDS = 500;
+  function backupAdvice() {
+    const s = get();
+    const count = Object.keys(s.cards).length;
+    const last = s.lastExportAt || null;
+    let level = 'ok', reason = null;
+
+    if (!last) {
+      if (count >= EXPORT_WORDS) {
+        level = 'warn';
+        reason = '还没有导出过备份，已分类 ' + count + ' 个词，建议导出一份存到网盘或电脑。';
+      }
+    } else {
+      const days = daysBetween(last, today());
+      const delta = count - (s.lastExportCount || 0);
+      if (days >= EXPORT_DAYS) {
+        level = 'warn';
+        reason = '距上次导出已 ' + days + ' 天，建议更新一份备份。';
+      } else if (delta >= EXPORT_WORDS) {
+        level = 'warn';
+        reason = '自上次导出又新分类了 ' + delta + ' 个词，建议更新一份备份。';
+      }
+    }
+    return { level: level, reason: reason, lastExportAt: last,
+             lastExportCount: s.lastExportCount || 0, count: count };
+  }
+
   /* ---------------------------------------------------------------- 导出接口 */
 
   return {
-    KEY: KEY,
+    KEY: KEY, BACKUP_KEY: BACKUP_KEY, CURRENT_VERSION: CURRENT_VERSION,
     load: load, get: get, save: save, flush: flush,
+    consumeNotice: consumeNotice,
     getCard: getCard, setCard: setCard, removeCard: removeCard,
     bump: bump, getDaily: getDaily, snapshotLevels: snapshotLevels,
     snoozeUpgrade: snoozeUpgrade, isUpgradeSnoozed: isUpgradeSnoozed,
     exportJSON: exportJSON, inspectImport: inspectImport,
     commitImport: commitImport, reset: reset,
+    markExported: markExported, backupAdvice: backupAdvice,
     today: today, fmt: fmt, parse: parse, addDays: addDays,
     daysBetween: daysBetween, lastNDays: lastNDays
   };

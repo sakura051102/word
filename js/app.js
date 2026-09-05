@@ -703,6 +703,17 @@
       '学习记录保存在这台电脑的浏览器里。清理浏览器数据会把它清掉，' +
       '所以重要进度请定期导出备份。备份文件也可以拷到手机或另一台电脑上接着背。' }));
 
+    /* 上次导出时间 + 备份到期轻提醒（每 7 天或每多分类 500 个词提醒一次）。
+       程序每次写入还会在本地留一份上一版自动快照，但那只防写坏、不防手动清数据。 */
+    const advice = S.backupAdvice();
+    g4.appendChild(el('p', {
+      class: 'field-note' + (advice.level === 'warn' ? ' field-note--warn' : ''),
+      text: advice.lastExportAt
+        ? '上次导出备份：' + advice.lastExportAt + '（' + fmtNum(advice.lastExportCount) +
+          ' 个词）。' + (advice.reason || '备份状态良好。')
+        : (advice.reason || '还没有导出过备份。')
+    }));
+
     const dataRow = el('div', { class: 'btn-row' });
     dataRow.appendChild(el('button', {
       class: 'btn', type: 'button', text: '导出备份', onclick: doExport
@@ -876,7 +887,10 @@
       a.click();
       document.body.removeChild(a);
       setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      // 记下本次导出时间/词数，供设置页状态行与到期提醒使用，并重绘当前页刷新状态
+      S.markExported();
       window.UI.toast('备份已导出', 'good');
+      render();
     } catch (e) {
       console.error(e);
       window.UI.toast('导出失败：' + e.message, 'warn', 5000);
@@ -1003,6 +1017,10 @@
       if (mq.addEventListener) mq.addEventListener('change', onChange);
       else if (mq.addListener) mq.addListener(onChange);
     }
+
+    /* 主档损坏并从自动备份回滚时，明确告知一次（不静默兜底，也不直接丢成空档） */
+    const loadNotice = S.consumeNotice();
+    if (loadNotice) window.UI.toast(loadNotice.message, 'warn', 9000);
 
     renderNav();
     render();

@@ -8,6 +8,7 @@
     "check": "node --check js/app.js && node --check js/review.js && node --check js/triage.js && node --check js/engine.js && node --check js/store.js && node --check js/wordbook.js",
     "smoke": "node tools/smoke-test.js",
     "engine": "node tools/test-engine.js",
+    "store": "node tools/test-store.js",
     "verify": "node tools/verify-wordbook.js"
   },
   "engines": {
