@@ -1,0 +1,17 @@
+{
+  "name": "kaoyan-vocab-pwa",
+  "version": "1.0.0",
+  "private": true,
+  "description": "考研英语一 5530 词：三级分类 + 间隔重复，纯前端零依赖可离线 PWA",
+  "scripts": {
+    "test": "node tools/run-all-tests.js",
+    "check": "node --check js/app.js && node --check js/review.js && node --check js/triage.js && node --check js/engine.js && node --check js/store.js && node --check js/wordbook.js",
+    "smoke": "node tools/smoke-test.js",
+    "engine": "node tools/test-engine.js",
+    "verify": "node tools/verify-wordbook.js"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "license": "UNLICENSED"
+}
