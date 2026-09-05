@@ -136,6 +136,25 @@ window.Review = (function () {
     };
   }
 
+  /*
+   * L3 熟词一次性排期（buildQueue 里唯一会【改写卡片】的副作用，单独抽出来）。
+   *
+   * 熟词不占每日新词配额、也不进当天学习队列（普查时已强制核对过一次），
+   * 拿配额限它们反而有害：按 6:3:1、每天 30 新词，熟词每天只能排 3 个，
+   * 两千个要 666 天。改为把首次巡检日均摊到自适应窗口（约每天 20 个，
+   * 下限 = L3 初始间隔 20 天、上限 120 天），两三分钟就能巡检完一天的量。
+   * 返回排期词数；调用方据此决定是否落盘。
+   */
+  function scheduleL3(cards, l3Words) {
+    const n = l3Words.length;
+    if (!n) return 0;
+    const win = Math.min(120, Math.max(E.LEVELS[3].initial, Math.ceil(n / 20)));
+    l3Words.forEach(function (w, i) {
+      E.activate(cards[w], 1 + Math.floor(i * win / n));
+    });
+    return n;
+  }
+
   function buildQueue() {
     const st    = S.get();
     const cards = st.cards;
@@ -178,36 +197,11 @@ window.Review = (function () {
       a.sort(function (x, y) { return window.WB.indexOf(x) - window.WB.indexOf(y); });
     });
 
-    /*
-     * L3 熟词不占每日新词配额。
-     *
-     * 它们不进当天的学习队列（普查已强制核对过一次），投放成本是零，
-     * 拿新词配额去限它们的速反而有害：按 6:3:1、每天 30 个新词算，
-     * 熟词每天只能排 3 个 —— 两千个熟词要 666 天才排完队，考研都考完了。
-     *
-     * 根子在于配额是按「卡片数」分的，但成本完全不同：
-     * 确认一个熟词两秒，啃一个生词十几秒，用同一把尺子量它们是错的。
-     *
-     * 改为一次性全部排期，把首次巡检日均摊到未来一段时间里。
-     * 窗口按数量自适应（约每天 20 个，下限 20 天、上限 120 天）：
-     * 两千个熟词摊到 100 天 = 每天 20 个巡检，两三分钟的事。
-     *
-     * 【跳过巡检】用户明确「熟词基本不需要过」——开启 skipL3Patrol 后，
-     * 熟词保持 active=false，彻底不进复习，也不占任何时间。
-     * 代价是「自以为会、其实不会」的熟词不会被抓出来，直到哪天它因为
-     * 别的词降级或被手动改类才重新出现。这是用户的明确取舍。
-     */
+    /* L3 熟词不占新词配额，进复习页时一次性把首次巡检日摊到未来（见 scheduleL3）。
+       skipL3Patrol 开启时一个都不排，熟词彻底不进复习。 */
     const l3Words = st.settings.skipL3Patrol ? [] : freshByLevel[2];
-    let l3Scheduled = 0;
-    if (l3Words.length) {
-      const n   = l3Words.length;
-      const win = Math.min(120, Math.max(E.LEVELS[3].initial, Math.ceil(n / 20)));
-      l3Words.forEach(function (w, i) {
-        E.activate(cards[w], 1 + Math.floor(i * win / n));
-      });
-      l3Scheduled = n;
-      S.save();
-    }
+    const l3Scheduled = scheduleL3(cards, l3Words);
+    if (l3Scheduled) S.save();
 
     /* 配额只在 L1/L2 之间分配：L3 可用量传 0，余量自动回流给 L1/L2，不浪费名额 */
     const alloc = allocate(budget, st.settings.quota,
