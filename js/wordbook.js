@@ -139,15 +139,56 @@ window.WB = (function () {
 
   /* ------------------------------------------------------------ 干扰项抽取 */
 
+  /* 释义「太像」判定 —— 不止完全相同，包含、近义改写、大段重叠都算太像。
+     选择题要的是有区分度的干扰项，两个选项释义几乎同义等于送分/误导。
+     中文释义都很短（二十字内），用零依赖的轻量启发式即可：
+       规范化（去括号补充/标点/空白）后，若整体相等、互相包含、
+       或存在 ≥3 字的连续公共片段（占较短串 70% 以上更严），就判为过近。 */
+  function normDef(s) {
+    return String(s || '')
+      .replace(/[（(].*?[)）]/g, '')
+      .replace(/[\s；;，,、\/·．\.]/g, '')
+      .toLowerCase();
+  }
+  function longestCommonLen(a, b) {
+    let best = 0;
+    for (let i = 0; i < a.length; i++) {
+      for (let j = 0; j < b.length; j++) {
+        let k = 0;
+        while (i + k < a.length && j + k < b.length && a[i + k] === b[j + k]) k++;
+        if (k > best) best = k;
+      }
+    }
+    return best;
+  }
+  function defsTooClose(t, c) {
+    if (!t || !c) return false;
+    if (t === c) return true;
+    const a = normDef(t), b = normDef(c);
+    if (!a || !b) return false;
+    if (a === b) return true;
+    if (a.length >= 2 && b.length >= 2 && (a.indexOf(b) >= 0 || b.indexOf(a) >= 0)) return true;
+    const lcs = longestCommonLen(a, b);
+    const shorter = Math.min(a.length, b.length);
+    if (lcs >= 3) return true;
+    if (shorter >= 2 && lcs / shorter >= 0.7) return true;
+    return false;
+  }
+  /** 取词条首个学习义项的【完整】文本（相似度比较不用截断版，避免省略号干扰） */
+  function firstDefText(entry) {
+    const d = studyDefs(entry)[0];
+    return (d && d.text) || '';
+  }
+
   /**
    * 为选择题抽 n 个干扰项。
    *
    * 优先级：
-   *   1) 同一主题分类内的词 —— 「政治法律」里的词互相混淆，比随便找个词当干扰项
-   *      有训练价值得多。这是词库带的 18 类分类给的便利。
-   *   2) 词表相邻位置 —— 本词库按真题词频降序排列，相邻即难度相近，
-   *      不会拿一个超高频词去干扰一个冷僻词（那种选项一眼就能排除）。
+   *   1) 同一主题分类内、且词频相近的词 —— 「政治法律」里难度相当的词互相混淆，
+   *      比随便找个词当干扰项有训练价值得多（词表按真题词频降序，index 近=词频近）。
+   *   2) 词表相邻位置 —— 相邻即难度相近，不会拿超高频词干扰冷僻词（一眼可排除）。
    *   3) 全表随机兜底。
+   * 三道来源都过同一个 tryPush：剔除释义与正确答案相同/过近的候选，保证区分度。
    */
   function distractors(entry, n, filterFn) {
     const total = size();
@@ -156,7 +197,7 @@ window.WB = (function () {
     const used = {};
     if (self >= 0) used[self] = true;
 
-    const selfDef = shortDef(entry);
+    const selfDef = firstDefText(entry);
 
     function tryPush(i) {
       if (picked.length >= n) return;
@@ -164,16 +205,25 @@ window.WB = (function () {
       const cand = words[i];
       if (!cand || !cand.word) return;
       if (filterFn && !filterFn(cand)) return;
-      // 释义与正确答案相同的不能当干扰项，否则「正确答案」有歧义
-      if (shortDef(cand) === selfDef) return;
+      // 释义与正确答案相同或过于接近的都不能当干扰项，否则选项没有区分度
+      if (defsTooClose(selfDef, firstDefText(cand))) return;
       used[i] = true;
       picked.push(cand);
     }
 
-    // 1) 同主题
+    // 1) 同主题，并在主题池内偏向词频相近（24 个 index 为一个随机桶，桶内随机、
+    //    整体就近），既保证难度匹配又不至于每次都是同样几个词
     if (entry.topic && byTopic[entry.topic] && byTopic[entry.topic].length > 1) {
       const pool = byTopic[entry.topic].slice();
-      shuffle(pool);
+      if (self >= 0) {
+        pool.sort(function (x, y) {
+          const bx = Math.floor(Math.abs(x - self) / 24) + Math.random() * 0.9;
+          const by = Math.floor(Math.abs(y - self) / 24) + Math.random() * 0.9;
+          return bx - by;
+        });
+      } else {
+        shuffle(pool);
+      }
       for (let k = 0; k < pool.length && picked.length < n; k++) tryPush(pool[k]);
     }
 

@@ -152,6 +152,32 @@ section('备份提醒：500 词 / 7 天阈值');
   check('距上次导出 6 天：ok', env.S.backupAdvice().level === 'ok');
 })();
 
+/* ====================================================== 7. 学习记录 CSV */
+
+section('学习记录导出 CSV：BOM / CRLF / 升序 / 正确率');
+
+(function () {
+  const env = freshStore();
+  env.S.load();
+  const yesterday = env.S.addDays(env.S.today(), -1);
+  env.S.bump('total', 4, yesterday);
+  env.S.bump('correct', 3, yesterday);   // 3/4 = 75%
+  env.S.bump('new', 2, yesterday);
+  env.S.bump('review', 2, yesterday);
+  env.S.bump('total', 5);
+  env.S.bump('correct', 5);             // 5/5 = 100%
+
+  const csv = env.S.toCSV();
+  check('带 UTF-8 BOM（Excel 不乱码）', csv.charCodeAt(0) === 0xFEFF);
+  const lines = csv.slice(1).split('\r\n');
+  check('CRLF 分行：表头 + 两天 = 3 行', lines.length === 3, '实际 ' + lines.length);
+  check('表头以 date 开头且含 accuracyPct',
+        lines[0].indexOf('date') === 0 && lines[0].indexOf('accuracyPct') >= 0);
+  check('按日期升序，第一行数据是昨天', lines[1].indexOf(yesterday) === 0);
+  check('昨天正确率 75', lines[1].split(',')[6] === '75', lines[1]);
+  check('今天正确率 100', lines[2].split(',')[6] === '100', lines[2]);
+})();
+
 /* ------------------------------------------------------------- 结果 */
 
 console.log('\n' + '='.repeat(46));

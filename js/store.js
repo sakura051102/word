@@ -204,7 +204,10 @@ window.Store = (function () {
   /* 节流写入：连续操作时最多每 400ms 落盘一次，
      但退出/切后台时强制 flush，保证不丢进度 */
   let pending = false, timer = null, lastWrite = 0, failed = false;
+  let lastSlowWarn = 0;
   const THROTTLE = 400;
+  // 单次序列化超过这个毫秒数就告警（5530 卡全量 stringify 的健康度埋点），5 秒内最多一条
+  const SLOW_SERIALIZE_MS = 30;
 
   function writeNow() {
     if (!state) return;
@@ -213,6 +216,7 @@ window.Store = (function () {
     lastWrite = Date.now();
 
     let str;
+    const t0 = Date.now();
     try {
       str = JSON.stringify(state);
     } catch (e) {
@@ -221,6 +225,12 @@ window.Store = (function () {
         console.error('[store] 序列化失败，本次未写入', e);
       }
       return;
+    }
+    const serializeMs = Date.now() - t0;
+    if (serializeMs >= SLOW_SERIALIZE_MS && Date.now() - lastSlowWarn > 5000) {
+      lastSlowWarn = Date.now();
+      console.warn('[store] 本次存档序列化耗时 ' + serializeMs + 'ms、约 ' +
+        Math.round(str.length / 1024) + 'KB；词量继续增大若感到卡顿，可考虑分片存储。');
     }
 
     try {
@@ -322,6 +332,34 @@ window.Store = (function () {
     return JSON.stringify(get(), null, 2);
   }
 
+  /** CSV 单元格转义：含逗号/引号/换行时用双引号包住，内部引号翻倍 */
+  function csvCell(v) {
+    const s = String(v == null ? '' : v);
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  /**
+   * 导出每日学习记录为 CSV（一行一天，按日期升序）。
+   * 带 UTF-8 BOM、CRLF 行尾，双击用 Excel 打开中文不乱码、列不串行。
+   * 列：日期 / 普查分类 / 新学 / 复习 / 过词合计 / 答对 / 正确率% / 学习秒数。
+   */
+  function toCSV() {
+    flush();
+    const st = get();
+    const head = ['date', 'triaged', 'newLearned', 'review', 'total',
+                  'correct', 'accuracyPct', 'seconds'];
+    const lines = [head.map(csvCell).join(',')];
+    Object.keys(st.daily).sort().forEach(function (d) {
+      const r = st.daily[d] || {};
+      const acc = r.total ? Math.round((r.correct || 0) / r.total * 1000) / 10 : '';
+      lines.push([
+        d, r.triaged || 0, r.new || 0, r.review || 0, r.total || 0,
+        r.correct || 0, acc, r.seconds || 0
+      ].map(csvCell).join(','));
+    });
+    return '﻿' + lines.join('\r\n');
+  }
+
   /** 校验并导入。返回 {ok, summary|error}，不直接写入 —— 由调用方确认后再 commit */
   function inspectImport(text) {
     let data;
@@ -418,7 +456,7 @@ window.Store = (function () {
     getCard: getCard, setCard: setCard, removeCard: removeCard,
     bump: bump, getDaily: getDaily, snapshotLevels: snapshotLevels,
     snoozeUpgrade: snoozeUpgrade, isUpgradeSnoozed: isUpgradeSnoozed,
-    exportJSON: exportJSON, inspectImport: inspectImport,
+    exportJSON: exportJSON, toCSV: toCSV, inspectImport: inspectImport,
     commitImport: commitImport, reset: reset,
     markExported: markExported, backupAdvice: backupAdvice,
     today: today, fmt: fmt, parse: parse, addDays: addDays,

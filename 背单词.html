@@ -997,6 +997,20 @@ nav.tabs.is-dim { opacity: .45; }
 .data-table thead th { color: var(--text-muted); font-weight: 650; }
 .data-table tbody th { text-align: left; font-weight: 500; color: var(--text-secondary); font-family: var(--font-ui); }
 
+/* 最易错词榜（统计页） */
+.weak-top { list-style: none; margin: 0; padding: 0; }
+.weak-row {
+  display: grid; grid-template-columns: 26px minmax(70px, auto) 1fr auto auto;
+  align-items: center; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--border);
+}
+.weak-row:last-child { border-bottom: 0; }
+.weak-rank { font-family: var(--font-num); font-size: .8rem; color: var(--text-muted); text-align: center; }
+.weak-meta { font-size: .76rem; color: var(--text-muted); font-family: var(--font-num); white-space: nowrap; }
+@media (max-width: 560px) {
+  .weak-row { grid-template-columns: 22px minmax(60px, auto) 1fr; row-gap: 5px; }
+  .weak-row .lv-chip, .weak-row .weak-meta { grid-column: 2 / -1; justify-self: start; }
+}
+
 .chart-tip {
   position: fixed; z-index: 60; pointer-events: none;
   background: var(--surface-solid); border: 1px solid var(--border-strong);

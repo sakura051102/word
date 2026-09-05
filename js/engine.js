@@ -151,14 +151,18 @@ window.Engine = (function () {
 
     /* ---- 自动降级：立即生效，只给界面一条提示 ---- */
     if (g === 'again') {
+      let downTo = 0, reason = '';
       if (card.level === 3) {
-        events.push({ type: 'downgrade', from: 3, to: 2,
-                      reason: '熟词答错，说明高估了它' });
-        setLevel(card, 2);
+        downTo = 2; reason = '熟词答错，说明高估了它';
       } else if (card.level === 2 && card.lvLapses >= L2_LAPSE_LIMIT) {
-        events.push({ type: 'downgrade', from: 2, to: 1,
-                      reason: '在「眼熟」阶段已答错 ' + card.lvLapses + ' 次' });
-        setLevel(card, 1);
+        // reason 必须在 setLevel 清掉 lvLapses 之前取
+        downTo = 1; reason = '在「眼熟」阶段已答错 ' + card.lvLapses + ' 次';
+      }
+      if (downTo) {
+        const from = card.level;
+        setLevel(card, downTo);
+        card.lastDowngradeAt = today;   // 记最近降级日，供薄弱词本筛「近 30 天掉过级」
+        events.push({ type: 'downgrade', from: from, to: downTo, reason: reason });
       }
       // L1 已在最低级，只重置间隔，不降级
     }
@@ -232,6 +236,34 @@ window.Engine = (function () {
     return c;
   }
 
+  /*
+   * 薄弱词本：命中任一条件即算薄弱 ——
+   *   · 累计答错 lapses ≥ 2（总是记不牢）；
+   *   · 近 recentDays 天内被自动降级过（刚掉级，最该马上补）。
+   * 返回 [{word, card}]，排序：最近掉级优先 → 答错次数多 → 当前间隔短。
+   */
+  function weakWords(cards, recentDays) {
+    const today = window.Store.today();
+    const win = recentDays || 30;
+    const out = [];
+    Object.keys(cards).forEach(function (w) {
+      const c = cards[w];
+      if (!c) return;
+      const recentDown = c.lastDowngradeAt &&
+        window.Store.daysBetween(c.lastDowngradeAt, today) <= win;
+      if ((c.lapses || 0) >= 2 || recentDown) out.push({ word: w, card: c });
+    });
+    out.sort(function (a, b) {
+      const da = a.card.lastDowngradeAt || '', db = b.card.lastDowngradeAt || '';
+      if (da !== db) return da < db ? 1 : -1;          // 字符串日期，越晚越大、越靠前
+      if ((b.card.lapses || 0) !== (a.card.lapses || 0)) {
+        return (b.card.lapses || 0) - (a.card.lapses || 0);
+      }
+      return (a.card.interval || 0) - (b.card.interval || 0);
+    });
+    return out;
+  }
+
   /* 掌握度分档（统计页用）—— 按当前间隔长度分 */
   function masteryBucket(card) {
     if (!card || !card.active) return 'unstudied';
@@ -291,6 +323,7 @@ window.Engine = (function () {
 
     isDue: isDue,
     levelCounts: levelCounts,
+    weakWords: weakWords,
     masteryBucket: masteryBucket,
     forecast: forecast,
     preview: preview,

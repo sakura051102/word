@@ -710,6 +710,38 @@ window.Charts = (function () {
     }));
   }
 
+  /* 最易错词榜：items = Engine.weakWords(...) 的结果（调用方负责 slice 到 Top N）。
+     图表模式是紧凑列表，表格模式给完整字段，和其它图共用 frame 外壳。 */
+  function weakTop(items) {
+    const WB = window.WB, E = window.Engine;
+    return frame('最易错的词 Top ' + items.length,
+      '按「最近掉级优先、累计答错次数多优先」排序，这些词最该优先补。',
+      function (mode) {
+        if (mode === 'table') {
+          return table(['#', '单词', '释义', '类别', '累计答错', '间隔(天)', '最近降级'],
+            items.map(function (x, i) {
+              const c = x.card, e = WB.get(x.word);
+              return [i + 1, x.word, e ? WB.shortDef(e, 24) : '',
+                      E.LEVELS[c.level].name, c.lapses || 0, c.interval || 0,
+                      c.lastDowngradeAt || '—'];
+            }));
+        }
+        const ol = el('ol', { class: 'weak-top' });
+        items.forEach(function (x, i) {
+          const c = x.card, e = WB.get(x.word);
+          ol.appendChild(el('li', { class: 'weak-row' }, [
+            el('span', { class: 'weak-rank', text: String(i + 1) }),
+            el('span', { class: 'w-word', text: x.word }),
+            el('span', { class: 'w-def', text: e ? WB.shortDef(e, 30) : '' }),
+            el('span', { class: 'lv-chip lv-chip--' + c.level, text: E.LEVELS[c.level].name }),
+            el('span', { class: 'weak-meta',
+              text: '错 ' + (c.lapses || 0) + (c.lastDowngradeAt ? ' · ' + c.lastDowngradeAt + ' 掉级' : '') })
+          ]));
+        });
+        return ol;
+      });
+  }
+
   return {
     levelTrend: levelTrend,
     triageProgress: triageProgress,
@@ -717,6 +749,7 @@ window.Charts = (function () {
     forecastChart: forecastChart,
     accuracyChart: accuracyChart,
     statTiles: statTiles,
+    weakTop: weakTop,
     streak: streak,
     hideTip: hideTip
   };

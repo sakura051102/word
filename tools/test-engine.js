@@ -233,6 +233,34 @@ section('isDue：未激活 / 无到期日不算到期');
   check('空对象安全返回 false', E.isDue(null) === false);
 })();
 
+/* ==================================================== 10. 薄弱词本 */
+
+section('薄弱词本：lapses≥2 或近 30 天掉级，最近掉级优先排序');
+
+(function () {
+  const today = S.today();
+  const cards = {};
+  const a = E.createCard(1); a.lapses = 2; delete a.lastDowngradeAt; cards.aaa = a;
+  const b = E.createCard(2); b.lapses = 0; b.lastDowngradeAt = today;       cards.bbb = b;
+  const c = E.createCard(3); c.lapses = 0; c.lastDowngradeAt = S.addDays(today, -40); cards.ccc = c;
+  const d = E.createCard(1); d.lapses = 1; cards.ddd = d;
+  const weak = E.weakWords(cards, 30).map(function (x) { return x.word; });
+  check('命中 lapses2 的 aaa 与今天掉级的 bbb',
+        weak.length === 2 && weak.indexOf('aaa') >= 0 && weak.indexOf('bbb') >= 0);
+  check('排除 40 天前掉级（超出窗口）的 ccc', weak.indexOf('ccc') < 0);
+  check('排除仅 lapses=1 的 ddd', weak.indexOf('ddd') < 0);
+  check('最近掉级的 bbb 排在最前', weak[0] === 'bbb');
+})();
+
+section('L3 答 again 降级时写入 lastDowngradeAt=今天');
+
+(function () {
+  const c = E.createCard(3);
+  E.activate(c);
+  E.grade(c, 'again', 'x');
+  check('降到 L2 且记录降级日', c.level === 2 && c.lastDowngradeAt === S.today());
+})();
+
 /* ------------------------------------------------------------- 结果 */
 
 console.log('\n' + '='.repeat(46));

@@ -61,12 +61,33 @@ window.Review = (function () {
    * buildQueue 和 status 都走这里，保证「首页显示的新词数」和
    * 「实际投放的新词数」永远一致，不会出现两个数字打架。
    */
+  const EXAM_BUFFER_DAYS = 10;    // 考前这么多天起停止投新词，纯滚动复习
+  const DAILY_CAPACITY_MIN = 40;  // 每天计划过词总量下限（新词+复习），约半小时学习量
+
   function effectiveLimit(st, remainingL12) {
     let base;
     if (st.settings.autoPace && st.settings.examDate) {
       const daysLeft = S.daysBetween(S.today(), st.settings.examDate);
-      if (daysLeft > 0) {
-        base = Math.max(0, Math.ceil(remainingL12 / Math.max(1, daysLeft - 10)));
+      if (daysLeft <= EXAM_BUFFER_DAYS) {
+        // 临考缓冲期：新词清零，把时间全部让给到期复习，不再开新坑
+        base = 0;
+      } else if (daysLeft > 0) {
+        const studyDays = daysLeft - EXAM_BUFFER_DAYS;
+        // 不考虑复习时，剩余新词均摊到每个可学日的量
+        const even = Math.ceil(remainingL12 / Math.max(1, studyDays));
+        // 近期（至多 30 天）预测的日均到期复习量 —— 复习高峰要少排新词
+        const horizon = Math.min(studyDays, 30);
+        const fc = E.forecast(st.cards, horizon);
+        let reviewSum = 0;
+        fc.forEach(function (d) { reviewSum += d.count; });
+        const avgReview = reviewSum / Math.max(1, horizon);
+        // 每日总预算 = 均摊新词的两倍（给复习留出等量时间），下限 40；
+        // 新词额度 = 预算 − 预计复习，且不超过均摊量（不提前透支），复习越重新词越少
+        const capacity = Math.max(DAILY_CAPACITY_MIN, even * 2);
+        base = Math.min(even, Math.round(capacity - avgReview));
+        // 离缓冲期还远时别让复习把新词彻底压没，保证每天至少推进一点，否则学不完
+        if (base <= 0 && remainingL12 > 0 && studyDays > 3) base = Math.min(even, 3);
+        base = Math.max(0, base);
       } else {
         base = Math.max(0, st.settings.dailyNew | 0);
       }
@@ -1012,6 +1033,6 @@ window.Review = (function () {
 
   return {
     mount: mount, unmount: unmount, status: status, allocate: allocate,
-    effectiveReviewCap: effectiveReviewCap
+    effectiveReviewCap: effectiveReviewCap, effectiveLimit: effectiveLimit
   };
 })();

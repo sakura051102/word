@@ -394,7 +394,8 @@
       { v: '2',    t: 'L2 眼熟' },
       { v: '3',    t: 'L3 熟词' },
       { v: 'none', t: '未分类' },
-      { v: 'due',  t: '今天到期' }
+      { v: 'due',  t: '今天到期' },
+      { v: 'weak', t: '薄弱词（错≥2 或近30天掉级）' }
     ], function (v) { bookState.level = v; bookState.page = 0; refresh(); }));
 
     /* 词频是单词级的（不区分义项）。「真题未出现」的那 200 个词
@@ -421,10 +422,16 @@
       const q = bookState.q.toLowerCase();
       const today = S.today();
 
+      // 薄弱词筛选只算一次，构造成 Set 供每行 O(1) 判断
+      const weakSet = bookState.level === 'weak'
+        ? new Set(E.weakWords(st.cards, 30).map(function (x) { return x.word; }))
+        : null;
+
       const rows = all.filter(function (entry) {
         const card = st.cards[entry.word];
         if (bookState.level === 'none') { if (card) return false; }
         else if (bookState.level === 'due') { if (!card || !E.isDue(card, today)) return false; }
+        else if (bookState.level === 'weak') { if (!weakSet.has(entry.word)) return false; }
         else if (bookState.level !== 'all') { if (!card || String(card.level) !== bookState.level) return false; }
 
         if (bookState.freq === 'tested' && !(window.WB.freqOf(entry) > 0)) return false;
@@ -634,6 +641,10 @@
     box.appendChild(window.Charts.heatmap(st.daily));
     box.appendChild(window.Charts.accuracyChart(st.daily));
 
+    // 薄弱词本：只在确实有薄弱词时出现，最多列 Top20，可切表格
+    const weak = E.weakWords(st.cards, 30).slice(0, 20);
+    if (weak.length) box.appendChild(window.Charts.weakTop(weak));
+
     return box;
   }
 
@@ -743,6 +754,11 @@
     dataRow.appendChild(el('button', {
       class: 'btn', type: 'button', text: '导入恢复',
       onclick: function () { fileInput.click(); }
+    }));
+    dataRow.appendChild(el('button', {
+      class: 'btn btn--ghost', type: 'button', text: '导出学习记录 CSV',
+      title: '把每天的新学/复习/正确率导出成表格，Excel 可直接打开，不影响备份',
+      onclick: doExportCSV
     }));
     dataRow.appendChild(fileInput);
     g4.appendChild(dataRow);
@@ -905,6 +921,24 @@
       S.markExported();
       window.UI.toast('备份已导出', 'good');
       render();
+    } catch (e) {
+      console.error(e);
+      window.UI.toast('导出失败：' + e.message, 'warn', 5000);
+    }
+  }
+
+  /* 导出每日学习记录 CSV（只含统计、不含完整卡片，故不更新备份时间戳） */
+  function doExportCSV() {
+    try {
+      const text = S.toCSV();
+      const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+      const url  = URL.createObjectURL(blob);
+      const a = el('a', { href: url, download: 'study-log-' + S.today() + '.csv' });
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      window.UI.toast('学习记录 CSV 已导出', 'good');
     } catch (e) {
       console.error(e);
       window.UI.toast('导出失败：' + e.message, 'warn', 5000);

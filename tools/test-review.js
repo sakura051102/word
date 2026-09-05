@@ -129,6 +129,34 @@ section('复习规划：今天到期全保留，往日积压按上限截取，�
   check('自动且无历史 → 23 全放', r.due === 23, '实际 ' + r.due);
 })();
 
+/* ============= 自动节奏：临考停新词、复习负载高时下调新词（阶段 E） ============ */
+
+section('effectiveLimit：临考停新词、复习负载高时少投新词');
+
+(function () {
+  resetState();
+  let st = S.get();
+  st.settings.autoPace = false;
+  st.settings.dailyNew = 25;
+  check('关闭自动节奏 → 用固定每日新词 25', R.effectiveLimit(st, 900) === 25);
+
+  resetState(); st = S.get(); st.settings.autoPace = true;
+  st.settings.examDate = S.addDays(S.today(), 5);   // 距考 5 天，落在 10 天缓冲内
+  check('临考缓冲期新词清零', R.effectiveLimit(st, 900) === 0);
+
+  resetState(); st = S.get(); st.settings.autoPace = true;
+  st.settings.examDate = S.addDays(S.today(), 100); // 可学 90 天，均摊 900/90=10
+  const far = R.effectiveLimit(st, 900);
+  check('远期且无复习负载 → 按均摊投 10', far === 10, '实际 ' + far);
+
+  resetState(); st = S.get(); st.settings.autoPace = true;
+  st.settings.examDate = S.addDays(S.today(), 20);  // 可学 10 天，均摊 900/10=90
+  for (let i = 0; i < 1000; i++) dueCard('ov' + i, 1, 0); // 1000 张今天到期 → 预测日均复习 100
+  // capacity=max(40, 90*2)=180，新词=min(90, round(180-100)=80)=80
+  const lim = R.effectiveLimit(st, 900);
+  check('复习负载高（预测日均 100）时新词从 90 下调到 80', lim === 80, '实际 ' + lim);
+})();
+
 /* ------------------------------------------------------------- 结果 */
 
 console.log('\n' + '='.repeat(46));
