@@ -33,7 +33,11 @@ window.Store = (function () {
       theme: 'auto',                  // auto | light | dark
       examDate: null,                 // 考试日期 'YYYY-MM-DD'，null = 未设置
       autoPace: true,                 // 按考试日期动态算每日新词量
-      skipL3Patrol: false             // 熟词不参与巡检（用户认为熟词基本不用过）
+      skipL3Patrol: false,            // 熟词不参与巡检（用户认为熟词基本不用过）
+      // 每天最多再消化多少个【往日积压】的到期复习词（今天新到期的不受限）：
+      //   0  = 自动（近 14 天日均复习量 ×1.5，无历史时不限，避免新用户被卡死）
+      //  -1  = 不限制（积压多少今天全做）；正数 = 固定每天上限
+      dailyReviewCap: 0
     },
     triage: { cursor: 0 },            // 普查游标（词表下标）
     cards: {},                        // word -> card

@@ -281,13 +281,22 @@
       }
     } else {
       if (rev.totalToday > 0) {
+        let revHint = null;
+        if (rev.newL3 > 0) {
+          revHint = '另有 ' + fmtNum(rev.newL3) +
+            ' 个熟词等待排期，进入复习页时会一次性摊到未来一段时间里陆续巡检，不占今天的量。';
+        }
+        if (rev.deferredBacklog > 0) {
+          const per = rev.reviewCap === null ? rev.backlog : rev.reviewCap;
+          const msg = '往日还有 ' + fmtNum(rev.deferredBacklog) + ' 个积压已顺延，' +
+            '按每天约 ' + per + ' 个的节奏，约 ' + rev.backlogDays + ' 天清完（设置里可调每日复习上限）。';
+          revHint = revHint ? revHint + ' ' + msg : msg;
+        }
         box.appendChild(actionCard({
           kicker: '阶段二 · 复习',
           title: '今天有 ' + rev.totalToday + ' 个词要过',
           desc: '到期复习 ' + rev.due + ' 个 · 新学 ' + rev.newToStudy + ' 个',
-          hint: rev.newL3 > 0
-            ? ('另有 ' + fmtNum(rev.newL3) + ' 个熟词等待排期，进入复习页时会一次性摊到未来一段时间里陆续巡检，不占今天的量。')
-            : null,
+          hint: revHint,
           btn: '开始复习',
           onclick: function () { go('review'); }
         }));
@@ -659,6 +668,11 @@
       s.dailyNew = v; S.save();
     }, '每天最多投放多少个没学过的词。到期复习的词不受这个限制。' +
        '（开启自动节奏后此项失效）'));
+
+    g1.appendChild(numberField('每日复习上限', s.dailyReviewCap, -1, 1000, function (v) {
+      s.dailyReviewCap = v; S.save();
+    }, '只限制每天再消化多少个【往日积压】，今天新到期的词不受限，断更几天也不用一次还几百个。' +
+       '0 = 自动（按近两周复习量的 1.5 倍动态定，没历史时不限）；-1 = 不限制；正数 = 每天固定上限。'));
 
     g1.appendChild(quotaField(s));
 

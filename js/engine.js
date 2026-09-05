@@ -123,9 +123,10 @@ window.Engine = (function () {
       card.lvLapses += 1;
 
     } else if (g === 'hard') {
-      card.streak   = 0;
+      // 「困难」= 勉强想起来：不算答错，所以【不清零连对】；但也不算一次干净的答对，
+      // 因此 streak 不 +1、reps 不 +1，只小幅压低 ease、间隔几乎不涨。
+      // （旧实现这里把 streak 清零，会让一次犹豫就打断升级连对，过于苛刻。）
       card.ease     = clamp(card.ease - 0.15, EASE_MIN, EASE_MAX);
-      // 困难不算答错，但间隔几乎不涨
       card.interval = clamp(Math.round(Math.max(1, card.interval) * 1.2), 1, MAX_INTERVAL);
 
     } else {

@@ -79,10 +79,66 @@ window.Review = (function () {
     return base + extra;
   }
 
+  /*
+   * 每天最多再消化多少个【往日积压】的复习词。
+   * 今天新到期的词是节奏内产物，不在此限；这里只拦「之前攒下、一次性全压到今天」
+   * 的逾期词，免得断了几天之后一打开要还几百个、直接劝退。
+   *   正数 = 固定上限；-1 = 不限；0 = 自动（近 14 天日均复习量 ×1.5）。
+   * 自动模式下若近两周完全没有复习记录（刚开始背）返回 null = 不限，
+   * 否则 cap 会算成 0、反而一个积压都不放，把新用户彻底卡死。
+   */
+  function effectiveReviewCap(st) {
+    const v = st.settings.dailyReviewCap;
+    if (v === undefined || v === null) return null;
+    if (v < 0) return null;
+    if (v > 0) return Math.floor(v);
+    let sum = 0;
+    S.lastNDays(14).forEach(function (d) {
+      const rec = st.daily[d];
+      if (rec && rec.review) sum += rec.review;
+    });
+    if (sum === 0) return null;
+    return Math.max(10, Math.ceil(sum / 14 * 1.5));
+  }
+
+  /*
+   * 复习负载规划（纯读取，不改任何卡片）：把到期词拆成「今天新到期」和「往日积压」，
+   * 积压按到期日从早到晚（欠最久的先还）排序，再按每日上限截取。
+   * buildQueue（真正建队列）和 status（首页计数）都走这里，保证两处数字一致，
+   * 不会出现首页说 200、进去只有 60 的打架情况。
+   */
+  function reviewPlan(st) {
+    const today = S.today();
+    const dueToday = [];
+    const overdue = [];
+    Object.keys(st.cards).forEach(function (w) {
+      const c = st.cards[w];
+      if (!c.active || !window.WB.get(w)) return;
+      if (!E.isDue(c, today)) return;
+      if (c.due === today) dueToday.push(w);
+      else overdue.push({ word: w, due: c.due });
+    });
+    overdue.sort(function (a, b) { return a.due < b.due ? -1 : a.due > b.due ? 1 : 0; });
+
+    const cap = effectiveReviewCap(st);
+    const picked = (cap === null) ? overdue.slice() : overdue.slice(0, cap);
+    const perDay = cap === null ? Math.max(1, overdue.length) : Math.max(1, cap);
+    const backlogDays = overdue.length === 0 ? 0
+      : Math.max(1, Math.ceil(overdue.length / perDay));
+    return {
+      dueTodayWords: dueToday,
+      pickedOverdue: picked,
+      reviewDue: dueToday.length + picked.length,
+      backlog: overdue.length,
+      deferredBacklog: overdue.length - picked.length,
+      cap: cap,
+      backlogDays: backlogDays
+    };
+  }
+
   function buildQueue() {
     const st    = S.get();
     const cards = st.cards;
-    const today = S.today();
 
     /* 默认「普查全部做完才开始复习」。入口按钮已经按这个规则隐藏，
        这里再挡一道，免得从别的路径绕进来直接开背。 */
@@ -90,22 +146,27 @@ window.Review = (function () {
       return { queue: [], dueCount: 0, newCount: 0, l3Scheduled: 0 };
     }
 
-    const dueItems = [];
     const freshByLevel = [[], [], []];
 
     Object.keys(cards).forEach(function (w) {
       const c = cards[w];
-      const entry = window.WB.get(w);
       // 词库换过之后可能有卡片对应不上词条 —— 跳过但不删卡片，
       // 万一将来换回去或补全词库，进度还在
-      if (!entry) return;
-      if (c.active) {
-        if (E.isDue(c, today)) {
-          dueItems.push({ word: w, card: c, entry: entry, isNew: false });
-        }
-      } else if (c.level >= 1 && c.level <= 3) {
+      if (!window.WB.get(w)) return;
+      if (!c.active && c.level >= 1 && c.level <= 3) {
         freshByLevel[c.level - 1].push(w);
       }
+    });
+
+    /* 到期复习词走统一规划：今天新到期的全放，往日积压按每日上限取「欠最久」的，
+       其余顺延到之后几天，避免断更后一打开就要一次还几百个。 */
+    const plan = reviewPlan(st);
+    const dueItems = [];
+    plan.pickedOverdue.forEach(function (p) {
+      dueItems.push({ word: p.word, card: cards[p.word], entry: window.WB.get(p.word), isNew: false });
+    });
+    plan.dueTodayWords.forEach(function (w) {
+      dueItems.push({ word: w, card: cards[w], entry: window.WB.get(w), isNew: false });
     });
 
     /* 新投放预算：今日上限减去今天已投放的 */
@@ -166,7 +227,11 @@ window.Review = (function () {
              limit: limit,
              usedToday: used,
              budget: budget,
-             unlearnedL12: freshByLevel[0].length + freshByLevel[1].length };
+             unlearnedL12: freshByLevel[0].length + freshByLevel[1].length,
+             backlog: plan.backlog,
+             deferredBacklog: plan.deferredBacklog,
+             backlogDays: plan.backlogDays,
+             reviewCap: plan.cap };
   }
 
   /* 三类交错：每次从剩余最多的那一类取一个，自然错开，
@@ -240,6 +305,7 @@ window.Review = (function () {
     return {
       queue: built.queue,
       pos: 0,
+      totalItems: built.queue.length,   // 初始规划量，做进度分母；again 当天重学不把它撑大
       dueCount: built.dueCount,
       newCount: built.newCount,
       l3Scheduled: built.l3Scheduled,
@@ -247,6 +313,10 @@ window.Review = (function () {
       usedToday: built.usedToday,
       budget: built.budget,
       unlearnedL12: built.unlearnedL12,
+      backlog: built.backlog,
+      deferredBacklog: built.deferredBacklog,
+      backlogDays: built.backlogDays,
+      reviewCap: built.reviewCap,
       stage: 'front',        // front | back | answered | upgrade | finished
       quiz: null,
       mode: null,
@@ -351,9 +421,14 @@ window.Review = (function () {
     if (n % 10 === 0) FX.flash('gold');
   }
 
+  /* again 的词当天隔几张再见一次：插入间隔区间，以及每词当天最多重学次数
+     （重学再忘也不无限插，保证队列必然收敛、不会死循环）。 */
+  const RELEARN_GAP_MIN = 6, RELEARN_GAP_MAX = 8, RELEARN_MAX = 1;
+
   function doGrade(g, srcEl, silent) {
     const it = currentItem();
     if (!it) return;
+    const isRelearn = !!it.relearn;
 
     /* silent 用于选择题：对错反馈在作答那一刻就放过了（quizFx），
        结算时再放一次会变成重复的双响炮。连击数字仍然照常弹。 */
@@ -362,18 +437,22 @@ window.Review = (function () {
     const wasNew = !it.card.active;
     const res = E.grade(it.card, g, it.word);
 
-    S.bump(wasNew ? 'new' : 'review', 1);
-    S.bump('total', 1);
+    /* 当天重学项只用于再强化一次，不重复记每日计数和本次小结，否则过词数、
+       正确率会被同一张卡刷虚高。 */
+    if (!isRelearn) {
+      S.bump(wasNew ? 'new' : 'review', 1);
+      S.bump('total', 1);
+      if (g !== 'again') { S.bump('correct', 1); sess.stats.correct++; }
+      else sess.stats.wrong++;
+      sess.stats.done++;
+    }
+    /* 连击是临场状态，重学照常参与：再忘就断、捡回来就连上。 */
     if (g !== 'again') {
-      S.bump('correct', 1);
-      sess.stats.correct++;
       sess.stats.combo++;
       if (sess.stats.combo > sess.stats.maxCombo) sess.stats.maxCombo = sess.stats.combo;
     } else {
-      sess.stats.wrong++;
       sess.stats.combo = 0;    // 断连
     }
-    sess.stats.done++;
     S.save();
     snapshot();
     comboFx();
@@ -390,6 +469,18 @@ window.Review = (function () {
         sess.pendingUpgrade = { word: it.word, card: it.card, from: ev.from, to: ev.to };
       }
     });
+
+    /* 「忘记」：引擎已把它的正式下次复习排到明天，这里再让它【当天】隔 6~8 张
+       露一次面强化记忆。重学项是浅拷贝（card 仍是同一张），带 relearn 标记、
+       不再重复计数；超过 RELEARN_MAX 就不再插，队列一定走得完。 */
+    if (g === 'again' && (it.relearnCount || 0) < RELEARN_MAX) {
+      const gap = RELEARN_GAP_MIN +
+        Math.floor(Math.random() * (RELEARN_GAP_MAX - RELEARN_GAP_MIN + 1));
+      const at = Math.min(sess.queue.length, sess.pos + 1 + gap);
+      sess.queue.splice(at, 0, Object.assign({}, it, {
+        relearn: true, relearnCount: (it.relearnCount || 0) + 1
+      }));
+    }
 
     if (hasUpgrade) { sess.stage = 'upgrade'; render(); }
     else advance();
@@ -448,18 +539,21 @@ window.Review = (function () {
   }
 
   function topBar() {
-    const total = sess.queue.length;
-    const pct = total ? (sess.pos / total * 100) : 0;
+    // 分母固定为初始规划量：again 当天重学会让 queue 临时变长，但进度条不因此倒退
+    const total = sess.totalItems || sess.queue.length;
+    const shown = Math.min(sess.pos + 1, total);
+    const pct = total ? (Math.min(sess.pos, total) / total * 100) : 0;
     const it = currentItem();
     return el('div', { class: 'review-top' }, [
       el('div', { class: 'progress' }, [
         el('div', { class: 'progress-fill', style: 'width:' + pct.toFixed(2) + '%' })
       ]),
       el('div', { class: 'review-meta' }, [
-        el('span', { text: (sess.pos + 1) + ' / ' + total }),
+        el('span', { text: shown + ' / ' + total }),
         it ? el('span', { class: 'lv-chip lv-chip--' + it.card.level,
                           text: E.LEVELS[it.card.level].name }) : null,
         it && it.isNew ? el('span', { class: 'new-chip', text: '新词' }) : null,
+        it && it.relearn ? el('span', { class: 'new-chip', text: '重学' }) : null,
         /* 连击常驻显示，和弹出的大数字互补：弹出的一闪而过，这里能随时瞄一眼 */
         sess.stats.combo >= 3
           ? el('span', { class: 'combo-chip', title: '连续答对 ' + sess.stats.combo + ' 个' }, [
@@ -729,6 +823,14 @@ window.Review = (function () {
     if (fc.length) muted.push('下一批到期：' + fc[0].date + '，共 ' + fc[0].count + ' 个词。');
     else           muted.push('未来一周没有到期的词。');
 
+    /* 被每日复习上限顺延的往日积压，明确告诉用户还欠多少、几天能清完 */
+    if (sess && sess.deferredBacklog > 0) {
+      const per = sess.reviewCap === null ? sess.backlog : sess.reviewCap;
+      muted.push('另有 ' + fmtNum(sess.deferredBacklog) + ' 个往日积压顺延到之后几天，' +
+        '按当前每天约 ' + per + ' 个的节奏，约 ' + sess.backlogDays + ' 天清完' +
+        '（设置里可调「每日复习上限」）。');
+    }
+
     return { kind: quotaUsedUp ? 'quota' : 'clear', title: '今天该做的都做完了', lines: lines, muted: muted };
   }
 
@@ -881,16 +983,18 @@ window.Review = (function () {
   function status() {
     const st    = S.get();
     const cards = st.cards;
-    const today = S.today();
-    let due = 0, freshAvail = [0, 0, 0];
+    const freshAvail = [0, 0, 0];
 
     Object.keys(cards).forEach(function (w) {
       const c = cards[w];
       if (!window.WB.get(w)) return;
-      if (c.active) { if (E.isDue(c, today)) due++; }
-      else if (c.level >= 1 && c.level <= 3) freshAvail[c.level - 1]++;
+      if (!c.active && c.level >= 1 && c.level <= 3) freshAvail[c.level - 1]++;
     });
 
+    /* 到期复习数与 buildQueue 走同一个规划函数：今天新到期全算、往日积压按上限算，
+       首页显示多少，点进去就真有多少，不会两个数字打架。 */
+    const plan   = reviewPlan(st);
+    const due    = plan.reviewDue;
     const limit  = effectiveLimit(st, freshAvail[0] + freshAvail[1]);
     const used   = S.getDaily().new || 0;
     const budget = Math.max(0, limit - used);
@@ -906,9 +1010,14 @@ window.Review = (function () {
       totalToday: due + alloc[0] + alloc[1],
       unlearned: freshAvail[0] + freshAvail[1] + freshAvail[2],
       unlearnedL12: freshAvail[0] + freshAvail[1],
-      limit: limit, usedToday: used, budget: budget
+      limit: limit, usedToday: used, budget: budget,
+      backlog: plan.backlog, deferredBacklog: plan.deferredBacklog,
+      backlogDays: plan.backlogDays, reviewCap: plan.cap
     };
   }
 
-  return { mount: mount, unmount: unmount, status: status, allocate: allocate };
+  return {
+    mount: mount, unmount: unmount, status: status, allocate: allocate,
+    effectiveReviewCap: effectiveReviewCap
+  };
 })();

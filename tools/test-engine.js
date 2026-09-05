@@ -153,6 +153,25 @@ section('同一状态下 easy 推得不比 good 近');
         JSON.stringify(p));
 })();
 
+/* ============================================================ 5b. hard 连对 */
+
+section('hard：勉强答对不清零连对、也不增加');
+
+(function () {
+  const c = E.createCard(1);
+  E.grade(c, 'good'); E.grade(c, 'good');   // streak = 2, reps = 2
+  const repsBefore = c.reps, easeBefore = c.ease;
+  E.grade(c, 'hard');
+  check('hard 后 streak 保持 2（不清零、不 +1）', c.streak === 2, '实际 ' + c.streak);
+  check('hard 不增加 reps', c.reps === repsBefore, '实际 ' + c.reps);
+  check('hard 小幅压低 ease', c.ease < easeBefore, 'ease ' + c.ease);
+
+  const a = E.createCard(1); E.grade(a, 'again');
+  check('对照：again 仍清零 streak', a.streak === 0);
+  const g = E.createCard(1); E.grade(g, 'good');
+  check('对照：good 使 streak +1', g.streak === 1);
+})();
+
 /* ============================================================ 6. 倍数公式 */
 
 section('multiplier：默认 ease 时倍数恰等于类别 growth');
