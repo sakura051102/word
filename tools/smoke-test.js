@@ -577,8 +577,11 @@ check('设置页出现「真题语料」信息组',
 section('冲刺面板 + 自动节奏 + 跳过巡检');
 
 /* 造一个干净、可预测的存档：reset 后手工铺卡片。
-   30 个 L1（已学 active、reps=0），20 个 L2（active、reps=1），
-   10 个 L3（未 active，模拟普查完但还没排期的熟词）。 */
+   30 个 L1（active、reps=0），20 个 L2（active、reps=1），
+   5 个 L3 已激活（模拟被排期激活的熟词）、5 个 L3 未激活。
+   —— 关键回归：L3 熟词即使 active 也不能算进「待背池」轮次。
+      （用户实测踩过：L3 被激活 3167 个后，轮次分子 3192 超过
+        分母 2363，进度破 100%。） */
 S.reset();
 const st2 = S.get();
 const defWords = win.WB.all();
@@ -595,7 +598,8 @@ function mkCard(lv, reps, active) {
 }
 for (let i = 0; i < 30; i++) st2.cards[defWords[i].word] = mkCard(1, 0, true);
 for (let i = 30; i < 50; i++) st2.cards[defWords[i].word] = mkCard(2, 1, true);
-for (let i = 50; i < 60; i++) st2.cards[defWords[i].word] = mkCard(3, 0, false);
+for (let i = 50; i < 55; i++) st2.cards[defWords[i].word] = mkCard(3, 1, true);   // L3 已激活
+for (let i = 55; i < 60; i++) st2.cards[defWords[i].word] = mkCard(3, 0, false);  // L3 未激活
 st2.settings.examDate = S.addDays(S.today(), 100);
 st2.settings.autoPace = true;
 st2.settings.skipL3Patrol = true;
@@ -609,19 +613,24 @@ const sTitle = queryAll(main, '.sprint-title')[0];
 check('  倒计时显示「距考研」', !!sTitle && sTitle.textContent.indexOf('距考研') >= 0,
       sTitle ? sTitle.textContent : '没找到 .sprint-title');
 
-/* 轮次进度：50 个 active，其中 20 个 reps>=1 → 第1轮 50，第2轮 20，第3轮 0 */
+/* 轮次进度：L1/L2 active 50 个，其中 20 个 reps>=1 → 第1轮 50，第2轮 20，第3轮 0。
+   分母是 L1/L2 之和 = 50。5 个已激活的 L3 不能混进来 —— 否则会变 55/50。 */
 const rNums = queryAll(main, '.sprint-round-num').map(function (n) { return n.textContent; });
-check('  轮次数字正确（50 已学 / 20 复习1次 / 0 复习2次）',
+check('  轮次数字正确（50 已学 / 20 复习1次 / 0 复习2次，不含 L3）',
       rNums[0] === '50 / 50' && rNums[1] === '20 / 50' && rNums[2] === '0 / 50',
       rNums.join(' | '));
+
+/* 冲刺模式首页不应显示 LV 经验条（避免「累计 N 次」和词数进度混淆） */
+check('  冲刺模式下首页不显示 LV 经验条', queryAll(main, '.exp-bar').length === 0);
 
 /* 每日目标：50 个未学？不对 —— 全部已学，remaining=0，目标应为 0 */
 const sSub = queryAll(main, '.sprint-sub')[0];
 check('  全部已学时每日目标为 0', !!sSub && sSub.textContent.indexOf('0 词') >= 0,
       sSub ? sSub.textContent : '没找到 .sprint-sub');
 
-/* skipL3Patrol：进入复习，L3 词不应被 activate */
-const l3word = defWords[55].word;
+/* skipL3Patrol：进入复习，尚未激活的 L3 词不应被 activate
+   （55-59 是 inactive 的 L3，用 57 验证） */
+const l3word = defWords[57].word;
 const wasInactive = st2.cards[l3word].active === false;
 queryAll(main, '.action-card .btn').filter(function (b) {
   return b.textContent.indexOf('复习') >= 0;

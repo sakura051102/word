@@ -154,6 +154,10 @@
     Object.keys(cards).forEach(function (w) {
       const c = cards[w];
       if (!c || !c.active) return;
+      /* 只数 L1/L2 —— L3 熟词即使被排期激活也不属于「待背池」。
+         不写这个过滤，熟词会全被算进「已学」，分子直接超过 L1+L2 分母，
+         进度条破 100%。用户实测踩到过：3192/2363。 */
+      if (c.level !== 1 && c.level !== 2) return;
       const reps = c.reps || 0;
       rounds[0]++;
       if (reps >= 1) rounds[1]++;
@@ -232,12 +236,14 @@
     const d   = S.getDaily();
     const box = el('div', { class: 'page' });
 
-    /* --- 玩家状态条：等级 + 经验 --- */
-    box.appendChild(expBar());
-
-    /* --- 冲刺面板：倒计时 + 每日目标 + 轮次进度（设了考试日期才显示）--- */
+    /* --- 冲刺模式 vs 游戏模式 ---
+       设了考试日期：首页第一块是冲刺面板（倒计时/待背/每日目标/轮次），
+       不放 LV 经验条 —— 冲刺期用户要的是进度确定性，不是升级。
+       「累计练习 N 次」「555 到下一级」这种次数概念会和词汇进度混淆，
+       用户实测把 LV 进度误读成词数进度了。 */
     const sprint = sprintPanel();
     if (sprint) box.appendChild(sprint);
+    else box.appendChild(expBar());
 
     /* --- 主行动区 --- */
     if (!tri.complete) {
@@ -278,16 +284,20 @@
       } else {
         const fc = E.forecast(st.cards, 8).slice(1).filter(function (x) { return x.count > 0; });
         const quotaUsedUp = rev.unlearnedL12 > 0 && rev.budget <= 0;
+        /* 配额用完 ≠ 所有词都学完了。文案必须说清「今天完成 + 还剩多少 + 节奏够不够」，
+           否则「今天该做的都做完了」紧跟「还有 2338 个没学」会让用户觉得自相矛盾。 */
         box.appendChild(actionCard({
           kicker: '今天',
-          title: '今天该做的都做完了',
+          title: quotaUsedUp ? '今天的新词背完了' : '今天没有要到期的复习',
           desc: quotaUsedUp
-            ? ('新词配额已用完：今天投放了 ' + rev.usedToday + ' / ' + rev.limit +
-               ' 个，还有 ' + fmtNum(rev.unlearnedL12) + ' 个词没学。')
+            ? ('已背 ' + rev.usedToday + ' 个新词（今日投放 ' + rev.limit + '）。' +
+               '词表还剩 ' + fmtNum(rev.unlearnedL12) + ' 个没学 —— ' +
+               '系统按你的考试日期每天投放 ' + rev.limit + ' 个，' +
+               (sprint ? '能在考前学完并留出复习时间。' : '能赶在计划内学完。'))
             : (fc.length ? ('下一批到期在 ' + fc[0].date + '，共 ' + fc[0].count + ' 个词。')
                          : '未来一周没有到期的词。'),
           hint: quotaUsedUp
-            ? '每天的量是刻意限的 —— 明天到期的复习会跟着涨上来，一次放太多后面几天会被压垮。真想加量就去设置里调。'
+            ? '明天会有新词，加上今天学过的词的首次复习一起来。保持每天跟上，量是均衡的。'
             : null,
           btn: (quotaUsedUp || rev.unlearned > 0) ? '进去看看' : null,
           onclick: function () { go('review'); }
