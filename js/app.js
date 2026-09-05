@@ -48,6 +48,9 @@
 
   function render() {
     window.UI.clear(mainEl);
+    // 在 body 上标记当前视图，供 CSS 按页切换布局（学习视图一屏化 / 信息页宽屏多列）。
+    // 这里是唯一的切页出口（go() 与首次启动都经过这里），打一处标即可覆盖全部页面。
+    document.body.setAttribute('data-view', view);
 
     let node = null;
     if (view === 'home')        node = pageHome();

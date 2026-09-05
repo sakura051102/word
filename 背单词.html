@@ -1155,6 +1155,198 @@ input:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--series-1); outline-offset: 2px;
 }
 
+/* ==================================================================
+   平板 / 宽屏适配（min-width:621px，即手机断点 620 之上的全部设备）
+   ------------------------------------------------------------------
+   目标（按页面性质区别对待，而不是一套密度套全站）：
+   · 普查 / 复习是「任务页」——严格压进一屏、不上下滑：整条 flex 链锁到
+     视口高度，释义/选项区在卡片内部滚动，操作按钮永远钉在卡片底部；
+   · 今日 / 统计是「信息页」——宽屏用多列把首屏信息密度提上来（见下）；
+   · 词书（5530 行长列表）/ 设置（长表单）保留整页滚动，不追求零滚动；
+   · 手机端（max-width:620px）维持原有纵向布局，下面这些规则一条都不命中。
+   ================================================================== */
+
+/* ---------- 学习视图（普查 / 复习）：flex 链贯通，严格一屏 ---------- */
+@media (min-width: 621px) {
+  body[data-view="triage"],
+  body[data-view="review"] {
+    height: 100dvh;
+    overflow: hidden;
+  }
+  body[data-view="triage"] .app,
+  body[data-view="review"] .app {
+    height: 100dvh;
+    display: flex; flex-direction: column;
+    /* 一屏内不滚动，无需再为整页滑动预留底部手势区，只留安全区 */
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+  body[data-view="triage"] header.top,
+  body[data-view="review"] header.top {
+    flex: 0 0 auto;
+    padding-top: calc(10px + env(safe-area-inset-top));
+    padding-bottom: 6px;
+  }
+  body[data-view="triage"] nav.tabs,
+  body[data-view="review"] nav.tabs { flex: 0 0 auto; margin-bottom: 10px; }
+  #banner { flex: 0 0 auto; }
+  body[data-view="triage"] #main,
+  body[data-view="review"] #main {
+    flex: 1 1 auto; min-height: 0;
+    display: flex; flex-direction: column;
+  }
+  body[data-view="triage"] .sub-view,
+  body[data-view="review"] .sub-view {
+    flex: 1 1 auto; min-height: 0; gap: 10px;
+  }
+
+  /* 顶栏 / 底栏不参与伸缩，舞台占满剩余高度，替掉写死的 330/350px */
+  .triage-top, .review-top, .triage-foot { flex: 0 0 auto; }
+  .triage-stage, .review-stage { flex: 1 1 auto; min-height: 0; }
+
+  /* 卡片纵向撑满舞台，内部用 flex 分配高度 */
+  .triage-card, .triage-done, .card, .empty-state { min-height: 0; }
+  .triage-card, .card { gap: 12px; }
+  .triage-done, .empty-state { overflow: auto; overscroll-behavior: contain; }
+
+  /* 固定高度的头部 / 提示 / 操作区不缩，把弹性留给中间内容 */
+  .word-head--big { flex: 0 0 auto; margin: 4px 0 2px; }
+  .card-hint, .triage-hint, .keyhint, .quiz-kind,
+  .verify-banner, .quiz-verdict { flex: 0 0 auto; }
+  .grade-row, .triage-actions, .verify-actions,
+  .card-actions, .lv-switch { flex: 0 0 auto; }
+
+  /* 释义区 / 选择题选项区：占据中间剩余空间，超出只在卡片内部滚动，
+     绝不再把底部按钮顶出屏幕 —— 这是「一屏」成立的关键 */
+  .card .defs-view,
+  .triage-card .defs-view {
+    flex: 1 1 auto; min-height: 0;
+    overflow: auto; overscroll-behavior: contain; padding-right: 4px;
+  }
+  .quiz-options {
+    flex: 1 1 auto; min-height: 0;
+    overflow: auto; overscroll-behavior: contain; padding-right: 4px;
+  }
+  .card-actions { margin-top: auto; }
+}
+
+/* ---------- 矮屏（横屏平板的高度是短板）：进一步收紧垂直尺寸 ---------- */
+@media (min-width: 621px) and (max-height: 880px) {
+  .triage-top, .review-top { padding: 9px 14px; }
+  .review-meta { margin-top: 6px; }
+  .triage-card, .card { padding: 18px 20px; gap: 10px; }
+  .word-head--big { margin: 2px 0; }
+  /* 单词字号改由【高度】约束 —— 横屏宽度大，用 vw 会把词撑得过高 */
+  .word-head--big .word-text { font-size: clamp(1.7rem, 4.4vh, 2.5rem); }
+  .grade-btn { padding: 10px 6px; }
+  .lv-btn { padding: 13px 8px; }
+  .quiz-opt { min-height: 44px; padding: 10px 14px; }
+  .triage-actions { gap: 9px; }
+}
+
+/* ---------- 横屏（≥768 且横向）：卡片内部左右分栏 ----------
+   左栏放大词头（单词 / 音标 / 发音），右栏放释义或选项 + 操作按钮。
+   只对「确实带大词头」的卡片分栏（:has）：普查卡 / 核对卡 / 翻卡 /
+   看词选义；看义选词（只有中文提示）、升级卡没有大词头，保持纵向。
+   旧内核不支持 :has() 时整条规则失效，自动回退到上面的纵向一屏，不崩。 */
+@media (min-width: 768px) and (orientation: landscape) {
+  body[data-view="review"] .review-stage .card:has(.word-head--big),
+  body[data-view="triage"] .triage-stage .triage-card:has(.word-head--big) {
+    display: grid;
+    grid-template-columns: minmax(0, 38%) minmax(0, 1fr);
+    column-gap: 26px; row-gap: 9px;
+    align-content: center;
+  }
+  /* 左栏：大词头跨全部行、垂直居中，内部纵向排列 */
+  .review-stage .word-head--big,
+  .triage-stage .word-head--big {
+    grid-column: 1; grid-row: 1 / -1;
+    align-self: center; justify-self: center;
+    display: flex; flex-direction: column; align-items: center;
+    text-align: center; gap: 8px; margin: 0; width: 100%;
+  }
+  .review-stage .word-head--big .phonetic,
+  .triage-stage .word-head--big .phonetic { width: auto; text-align: center; }
+  /* 右栏：其余子元素全部落到第二列，按 DOM 顺序纵向堆叠 */
+  .review-stage .card > *:not(.word-head--big),
+  .triage-stage .triage-card > *:not(.word-head--big) { grid-column: 2; }
+  /* 分栏后高度是短板，右栏滚动区用视口高度封顶 */
+  .review-stage .card .defs-view,
+  .triage-stage .triage-card .defs-view { max-height: 46dvh; }
+  .review-stage .quiz-options { max-height: 44dvh; }
+  .review-stage .word-head--big .word-text,
+  .triage-stage .word-head--big .word-text { font-size: clamp(1.8rem, 6vh, 2.8rem); }
+}
+
+/* ---------- 宽屏信息页（今日 / 统计）：放宽容器 + 多列压缩首屏 ---------- */
+@media (min-width: 768px) {
+  .app { max-width: 1120px; padding-bottom: 18px; }
+
+  /* 信息页用更紧凑的垂直密度，把内容压进首屏（手机端不受影响） */
+  body[data-view="home"] .page,
+  body[data-view="stats"] .page { gap: 14px; }
+  .action-card { padding: 18px 20px; gap: 6px; }
+  .action-title { margin-bottom: 2px; }
+  .action-card .btn { margin-top: 2px; }
+  .exp-bar { padding: 13px 18px; }
+  .tiles { padding: 14px 16px; gap: 10px; }
+  .chart-card { padding: 16px 18px; }
+  .chart-head { margin-bottom: 10px; }
+
+  /* 今日页：冲刺/经验条跨整行；行动卡两张时并排、一张时跨整行；
+     数据块(.tiles)与三类分布卡(.chart-card)各占一列并排成一行，省下一整行高度 */
+  body[data-view="home"] .page {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px; align-items: start;
+  }
+  body[data-view="home"] .page > .sprint,
+  body[data-view="home"] .page > .exp-bar,
+  body[data-view="home"] .page > .action-card { grid-column: 1 / -1; }
+  /* 存在两张行动卡（普查 + 复习入口）时各占一列并排；只有一张时仍跨整行 */
+  body[data-view="home"] .page:has(.action-card ~ .action-card) > .action-card {
+    grid-column: auto;
+  }
+
+  /* 统计页：数据块也作为一格，全部图表卡自然两列排布（3 行铺满首屏） */
+  body[data-view="stats"] .page {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px; align-items: stretch;
+  }
+  /* 两列后图表按列宽缩放，给 SVG 限高避免某张图（如热力图）把整行撑得过高 */
+  body[data-view="stats"] .chart-card svg,
+  body[data-view="home"] .chart-card svg { max-height: 158px; }
+  body[data-view="stats"] .tiles,
+  body[data-view="home"] .tiles { align-content: center; }
+  body[data-view="stats"] .tile-num,
+  body[data-view="home"] .tile-num { font-size: 1.42rem; }
+
+  /* 设置是长表单、词书是长列表，不做两列（保留整页滚动），
+     但限制行宽避免在超宽屏上输入框 / 行被拉得过长难读 */
+  body[data-view="set"] .page { max-width: 880px; margin: 0 auto; width: 100%; }
+}
+
+/* 宽屏但屏幕矮（横屏平板的高度短板）：信息页再紧一档，把统计六卡压进首屏；
+   竖屏平板高度充裕（不命中 max-height），图表保持更大更舒展。必须排在上面的
+   宽屏块之后，同特异性时后定义生效，才能把 svg 限高从 158 进一步收到 126。 */
+@media (min-width: 768px) and (max-height: 880px) {
+  body[data-view="stats"] .chart-card,
+  body[data-view="home"] .chart-card { padding: 12px 14px; }
+  body[data-view="stats"] .chart-card svg { max-height: 108px; }
+  /* 矮横屏首屏优先：辅助说明与图例压紧（竖屏 / 桌面不受影响，照常显示） */
+  body[data-view="stats"] .chart-note { display: none; }
+  body[data-view="stats"] .legend { gap: 12px; margin-top: 8px; }
+  body[data-view="stats"] .tiles,
+  body[data-view="home"] .tiles { padding: 12px 14px; }
+  .heat-scale { margin-top: 6px; }
+}
+
+/* 超宽屏（桌面浏览器）：信息页再放一档，学习视图维持舒适阅读宽度 */
+@media (min-width: 1280px) {
+  body[data-view="home"] .page,
+  body[data-view="stats"] .page { max-width: 1180px; margin: 0 auto; width: 100%; }
+}
+
 /* ------------------------------------------------------------------ 窄屏 */
 
 @media (max-width: 620px) {
