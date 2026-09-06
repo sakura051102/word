@@ -1,8 +1,13 @@
 /* ===========================================================================
- *  engine.js —— 间隔重复引擎 + 三级升降级规则
+ *  engine.js —— 间隔重复引擎 + 升降级规则（v2）
  * ---------------------------------------------------------------------------
- *  设计：不写三套算法。同一个 SM-2 变体，三个类别给三套参数。
- *  类别决定「起点和节奏」，引擎负责后续调度。
+ *  主复习只跑 L1 生词 / L2 眼熟两类，同一个 SM-2 变体、两套参数，
+ *  刻意把 L1 与 L2 的频率差拉大到 5~8 倍，让「升降级」在体感上明显：
+ *    · L1 生词：起点 1 天、增长 1.5（爬得慢、反复见）
+ *    · L2 眼熟：起点 5 天、增长 2.2（快速拉疏）
+ *  L3 熟词不进主复习，是独立「熟词速过池」：只由 L2 连对达标自动升入，
+ *  或来自旧版存量（l3Origin='legacy'）；在速过模式里「认识」继续拉长、
+ *  「不认识」自动打回 L2。archived=true 的词永不复习，被一切调度排除。
  * =========================================================================== */
 
 window.Engine = (function () {
@@ -11,9 +16,9 @@ window.Engine = (function () {
   /* ---------------------------------------------------------------- 类别参数 */
 
   const LEVELS = {
-    1: { key: 'L1', name: '生词', hint: '完全不熟',     initial: 1,  growth: 1.6 },
-    2: { key: 'L2', name: '眼熟', hint: '有印象但会忘', initial: 3,  growth: 2.0 },
-    3: { key: 'L3', name: '熟词', hint: '基本不会忘',   initial: 20, growth: 2.5 }
+    1: { key: 'L1', name: '生词', hint: '完全不熟',     initial: 1,  growth: 1.5 },
+    2: { key: 'L2', name: '眼熟', hint: '有印象但会忘', initial: 5,  growth: 2.2 },
+    3: { key: 'L3', name: '熟词', hint: '速过池，基本不会忘', initial: 20, growth: 2.5 }
   };
 
   const EASE_DEFAULT = 2.5;
@@ -21,13 +26,13 @@ window.Engine = (function () {
   const EASE_MAX     = 3.0;
   const MAX_INTERVAL = 180;   // 备考周期内间隔超过半年没意义，也防止词彻底消失
 
-  /* 升级门槛 */
+  /* 自动升级门槛（连对 streak 次、且间隔已被拉到 interval 天以上才升） */
   const UPGRADE = {
-    1: { streak: 3, interval: 7  },   // L1 → L2
-    2: { streak: 3, interval: 21 }    // L2 → L3
+    1: { streak: 3, interval: 5  },   // L1 → L2（生词稳定几次后降为眼熟）
+    2: { streak: 3, interval: 21 }    // L2 → L3（眼熟长期稳定后升入熟词速过池）
   };
 
-  /* 降级门槛：L2 在本级内累计答错到此数则降级 */
+  /* 降级门槛：L2 在本级内累计答错到此数则打回 L1 */
   const L2_LAPSE_LIMIT = 2;
 
   /* ------------------------------------------------------------ 间隔增长系数 */
@@ -102,9 +107,9 @@ window.Engine = (function () {
   /*
    * 对一张卡片评分。word 用于判断该词的升级提示是否在免打扰期内，可省略。
    *
-   * 返回 { card, events }，events 里可能有：
-   *   { type:'downgrade', from, to, reason } —— 已自动生效，仅供界面提示
-   *   { type:'upgrade-prompt', from, to }    —— 尚未生效，需用户确认
+   * 返回 { card, events }，events 里可能有（均已自动生效，仅供界面轻提示）：
+   *   { type:'downgrade', from, to, reason }
+   *   { type:'upgrade', from, to }
    *
    * 注意：本函数直接修改传入的 card 对象。
    */
@@ -167,12 +172,17 @@ window.Engine = (function () {
       // L1 已在最低级，只重置间隔，不降级
     }
 
-    /* ---- 升级提示：需要用户确认，此处不改 level ---- */
+    /* ---- 自动升级：达标立即换级、按新级节奏重排，无需用户确认 ---- */
     if (g === 'good' || g === 'easy') {
       const rule = UPGRADE[card.level];
-      const snoozed = word ? window.Store.isUpgradeSnoozed(word) : false;
-      if (rule && card.streak >= rule.streak && card.interval >= rule.interval && !snoozed) {
-        events.push({ type: 'upgrade-prompt', from: card.level, to: card.level + 1 });
+      if (rule && card.streak >= rule.streak && card.interval >= rule.interval) {
+        const from = card.level, to = card.level + 1;
+        setLevel(card, to);
+        // 升级后不丢已积累的间隔，但至少跳到新级起点，免得升了级还天天见
+        card.interval = clamp(Math.max(card.interval, LEVELS[to].initial), 1, MAX_INTERVAL);
+        card.due      = window.Store.addDays(today, card.interval);
+        if (to === 3) card.l3Origin = 'promoted';   // L2 升上来的熟词=新晋级
+        events.push({ type: 'upgrade', from: from, to: to });
       }
     }
 
@@ -188,24 +198,50 @@ window.Engine = (function () {
     return card;
   }
 
-  /* 用户确认升级 —— 立刻按新类别的节奏重排下次复习 */
+  /* 手动/兼容入口：按新类别的节奏重排下次复习（正常升级已在 grade 内自动完成） */
   function applyUpgrade(card, toLevel) {
     setLevel(card, toLevel);
-    // 升级后不重置进度，但间隔至少跳到新类别的初始值，免得升了级还天天见
     card.interval = clamp(Math.max(card.interval, LEVELS[toLevel].initial), 1, MAX_INTERVAL);
     card.due      = window.Store.addDays(window.Store.today(), card.interval);
+    if (toLevel === 3) card.l3Origin = 'promoted';
     return card;
   }
 
-  /* 手动改类别（词书页 / 复习界面的下拉） */
+  /* 手动改类别（词书页 / 复习界面）。手动丢进熟词池按「原熟词」归类。 */
   function manualSetLevel(card, toLevel) {
     setLevel(card, toLevel);
+    if (toLevel === 3 && !card.l3Origin) card.l3Origin = 'legacy';
     if (card.active) {
       card.interval = clamp(Math.max(1, Math.min(card.interval, LEVELS[toLevel].initial)),
                             1, MAX_INTERVAL);
       card.due = window.Store.addDays(window.Store.today(), card.interval);
     }
     return card;
+  }
+
+  /* ---------------------------------------------------------------- 永不复习 */
+  /* 归档：从一切复习/速过/预测/统计中移除，但保留卡片与进度，可随时恢复。 */
+  function archive(card) {
+    if (!card) return card;
+    card.archived = true;
+    card.archivedAt = window.Store.today();
+    return card;
+  }
+
+  function unarchive(card) {
+    if (!card) return card;
+    card.archived = false;
+    delete card.archivedAt;
+    return card;
+  }
+
+  function isArchived(card) { return !!(card && card.archived); }
+
+  /* 统计已归档（永不复习）词数 */
+  function archivedCount(cards) {
+    let n = 0;
+    Object.keys(cards).forEach(function (w) { if (cards[w] && cards[w].archived) n++; });
+    return n;
   }
 
   /* 把一个词打回未学状态，但保留它的类别和建档日期（词书页的「重置」） */
@@ -222,15 +258,17 @@ window.Engine = (function () {
   /* ---------------------------------------------------------------- 查询工具 */
 
   function isDue(card, dateStr) {
-    if (!card || !card.active || !card.due) return false;
+    if (!card || card.archived || !card.active || !card.due) return false;
     return window.Store.daysBetween(card.due, dateStr || window.Store.today()) >= 0;
   }
 
-  /* 统计三类词数，返回 [L1, L2, L3] */
+  /* 统计三类词数，返回 [L1, L2, L3]；永不复习的词不计入任何类别 */
   function levelCounts(cards) {
     const c = [0, 0, 0];
     Object.keys(cards).forEach(function (w) {
-      const lv = cards[w].level;
+      const card = cards[w];
+      if (!card || card.archived) return;
+      const lv = card.level;
       if (lv >= 1 && lv <= 3) c[lv - 1]++;
     });
     return c;
@@ -248,7 +286,7 @@ window.Engine = (function () {
     const out = [];
     Object.keys(cards).forEach(function (w) {
       const c = cards[w];
-      if (!c) return;
+      if (!c || c.archived) return;
       const recentDown = c.lastDowngradeAt &&
         window.Store.daysBetween(c.lastDowngradeAt, today) <= win;
       if ((c.lapses || 0) >= 2 || recentDown) out.push({ word: w, card: c });
@@ -266,7 +304,9 @@ window.Engine = (function () {
 
   /* 掌握度分档（统计页用）—— 按当前间隔长度分 */
   function masteryBucket(card) {
-    if (!card || !card.active) return 'unstudied';
+    if (!card) return 'unstudied';
+    if (card.archived) return 'archived';
+    if (!card.active) return 'unstudied';
     if (card.interval < 7)  return 'learning';
     if (card.interval < 30) return 'familiar';
     return 'mastered';
@@ -282,7 +322,7 @@ window.Engine = (function () {
 
     Object.keys(cards).forEach(function (w) {
       const card = cards[w];
-      if (!card.active || !card.due) return;
+      if (!card || card.archived || !card.active || !card.due) return;
       if (index[card.due] !== undefined) {
         out[index[card.due]].count++;
       } else if (window.Store.daysBetween(card.due, today) > 0) {
@@ -320,6 +360,8 @@ window.Engine = (function () {
     applyUpgrade: applyUpgrade,
     manualSetLevel: manualSetLevel,
     resetCard: resetCard,
+    archive: archive, unarchive: unarchive,
+    isArchived: isArchived, archivedCount: archivedCount,
 
     isDue: isDue,
     levelCounts: levelCounts,

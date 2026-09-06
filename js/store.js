@@ -19,13 +19,15 @@ window.Store = (function () {
   // 万一新主档被截断 / 写坏，加载时还能回滚到完整的上一代（见 writeNow / load）。
   const BACKUP_KEY = KEY + '_backup';
   // 当前存档结构版本。老存档加载时按 MIGRATIONS 逐级迁移到该版本。
-  const CURRENT_VERSION = 1;
+  //   v1：三类都进复习；v2：主复习只跑 L1/L2，L3 剥离为「熟词速过池」，
+  //       新增单词本 notebooks、卡片归档标记 archived、L3 来源标记 l3Origin。
+  const CURRENT_VERSION = 2;
 
   const DEFAULTS = {
-    version: 1,
+    version: 2,
     settings: {
       dailyNew: 30,                   // 每日新投放上限
-      quota: [6, 3, 1],               // L1:L2:L3 投放配额
+      quota: [6, 3],                  // L1:L2 新词投放配额（L3 不进主复习，无配额）
       triageBatch: 100,               // 普查每批词数
       autoSpeak: true,                // 翻面自动朗读
       reviewBeforeTriageDone: false,  // 允许普查未完成就开始复习
@@ -33,7 +35,6 @@ window.Store = (function () {
       theme: 'auto',                  // auto | light | dark
       examDate: null,                 // 考试日期 'YYYY-MM-DD'，null = 未设置
       autoPace: true,                 // 按考试日期动态算每日新词量
-      skipL3Patrol: false,            // 熟词不参与巡检（用户认为熟词基本不用过）
       // 每天最多再消化多少个【往日积压】的到期复习词（今天新到期的不受限）：
       //   0  = 自动（近 14 天日均复习量 ×1.5，无历史时不限，避免新用户被卡死）
       //  -1  = 不限制（积压多少今天全做）；正数 = 固定每天上限
@@ -43,7 +44,8 @@ window.Store = (function () {
     cards: {},                        // word -> card
     daily: {},                        // YYYY-MM-DD -> 当日计数
     levelSnap: {},                    // YYYY-MM-DD -> [L1数, L2数, L3数]
-    upgradeSnooze: {},                // word -> 该日期前不再提示升级
+    upgradeSnooze: {},                // word -> 该日期前不再提示升级（保留，自动升级后基本不再用）
+    notebooks: {},                    // nbId -> {id,name,words:[],createdAt} 自定义单词本
     lastExportAt: null,               // 上次手动导出备份的日期（备份提醒用）
     lastExportCount: 0                // 上次导出时已建档词数（增量达 500 提醒）
   };
@@ -118,7 +120,28 @@ window.Store = (function () {
      普通新增字段交给 fillDefaults 兜底即可，这里只放需要改结构 / 重命名的硬迁移，
      保证几年前的老存档也能一级级升到 CURRENT_VERSION，而不是直接读崩。 */
   const MIGRATIONS = {
-    // 示例（将来用）：1: function (d) { d.settings.newField = ...; delete d.oldField; }
+    /* v1 → v2：主复习只保留 L1/L2，L3 转为独立「熟词速过池」。
+       · 配额从 [L1,L2,L3] 收成两类；移除已废弃的 skipL3Patrol；
+       · 现存 L3 卡标 l3Origin='legacy'（原熟词），与之后 L2 升上来的 'promoted' 区分；
+       · 初始化 archived（永不复习）标记与单词本容器。
+       不删任何卡、不改到期日，保证升级后不爆量、不丢进度。 */
+    1: function (d) {
+      if (d.settings) {
+        if (Array.isArray(d.settings.quota)) {
+          d.settings.quota = [d.settings.quota[0] || 6, d.settings.quota[1] || 3];
+        }
+        delete d.settings.skipL3Patrol;
+      }
+      if (d.cards) {
+        Object.keys(d.cards).forEach(function (w) {
+          const c = d.cards[w];
+          if (!c) return;
+          if (c.level === 3 && !c.l3Origin) c.l3Origin = 'legacy';
+          c.archived = !!c.archived;
+        });
+      }
+      if (!d.notebooks || typeof d.notebooks !== 'object') d.notebooks = {};
+    }
   };
 
   function migrate(d) {
@@ -325,6 +348,84 @@ window.Store = (function () {
     return !!until && daysBetween(today(), until) > 0;
   }
 
+  /* ---------------------------------------------------------------- 单词本 */
+  /* 单词本与等级体系正交：只做收藏，不影响任何复习调度。一个词可同时进多个本，
+     关系存在本子的 words 里（而不是卡片上），删本绝不删卡片与学习进度。 */
+
+  function nbId() {
+    return 'nb_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+  }
+
+  /** 全部单词本，按创建时间升序，返回带 count 的浅拷贝数组 */
+  function listNotebooks() {
+    const nbs = get().notebooks || {};
+    return Object.keys(nbs).map(function (id) {
+      const nb = nbs[id];
+      return { id: nb.id, name: nb.name, createdAt: nb.createdAt,
+               words: (nb.words || []).slice(), count: (nb.words || []).length };
+    }).sort(function (a, b) { return (a.createdAt || '') < (b.createdAt || '') ? -1 : 1; });
+  }
+
+  function getNotebook(id) {
+    return (get().notebooks || {})[id] || null;
+  }
+
+  /** 新建本，名字去空白；重名允许（用户可自行区分）。返回新本，空名返回 null */
+  function createNotebook(name) {
+    const nm = String(name == null ? '' : name).trim();
+    if (!nm) return null;
+    const nb = { id: nbId(), name: nm.slice(0, 40), words: [], createdAt: today() };
+    get().notebooks[nb.id] = nb;
+    save();
+    return nb;
+  }
+
+  function renameNotebook(id, name) {
+    const nb = getNotebook(id);
+    if (!nb) return false;
+    const nm = String(name == null ? '' : name).trim();
+    if (!nm) return false;
+    nb.name = nm.slice(0, 40);
+    save();
+    return true;
+  }
+
+  function removeNotebook(id) {
+    const nbs = get().notebooks || {};
+    if (!nbs[id]) return false;
+    delete nbs[id];
+    save();
+    return true;
+  }
+
+  /** 把词加入本（去重）。返回 true=新加入，false=本来就在 */
+  function addWordToNotebook(id, word) {
+    const nb = getNotebook(id);
+    if (!nb || !word) return false;
+    if (!nb.words) nb.words = [];
+    if (nb.words.indexOf(word) >= 0) return false;
+    nb.words.push(word);
+    save();
+    return true;
+  }
+
+  function removeWordFromNotebook(id, word) {
+    const nb = getNotebook(id);
+    if (!nb || !nb.words) return false;
+    const i = nb.words.indexOf(word);
+    if (i < 0) return false;
+    nb.words.splice(i, 1);
+    save();
+    return true;
+  }
+
+  /** 该词所在的全部单词本（供词书页展示） */
+  function notebooksOfWord(word) {
+    return listNotebooks().filter(function (nb) {
+      return nb.words.indexOf(word) >= 0;
+    });
+  }
+
   /* ---------------------------------------------------------------- 导入导出 */
 
   function exportJSON() {
@@ -456,6 +557,10 @@ window.Store = (function () {
     getCard: getCard, setCard: setCard, removeCard: removeCard,
     bump: bump, getDaily: getDaily, snapshotLevels: snapshotLevels,
     snoozeUpgrade: snoozeUpgrade, isUpgradeSnoozed: isUpgradeSnoozed,
+    listNotebooks: listNotebooks, getNotebook: getNotebook,
+    createNotebook: createNotebook, renameNotebook: renameNotebook,
+    removeNotebook: removeNotebook, addWordToNotebook: addWordToNotebook,
+    removeWordFromNotebook: removeWordFromNotebook, notebooksOfWord: notebooksOfWord,
     exportJSON: exportJSON, toCSV: toCSV, inspectImport: inspectImport,
     commitImport: commitImport, reset: reset,
     markExported: markExported, backupAdvice: backupAdvice,
