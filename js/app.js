@@ -34,7 +34,7 @@
 
   function renderNav() {
     window.UI.clear(navEl);
-    const isSub = (view === 'triage' || view === 'review');
+    const isSub = (view === 'triage' || view === 'review' || view === 'rapid');
     TABS.forEach(function (t) {
       navEl.appendChild(el('button', {
         class: 'tab' + (view === t.id ? ' is-active' : ''),
@@ -78,6 +78,11 @@
       mainEl.appendChild(host);
       window.Review.mount(host, { onExit: function () { go('home'); } });
       mounted = window.Review;
+    } else if (view === 'rapid') {
+      const host = el('div', { class: 'sub-view' });
+      mainEl.appendChild(host);
+      window.Rapid.mount(host, { onExit: function () { go('home'); } });
+      mounted = window.Rapid;
     }
   }
 
@@ -262,8 +267,8 @@
         title: tri.done === 0 ? '先把整本词表过一遍' : '继续普查',
         desc: '还有 ' + fmtNum(tri.remaining) + ' 个词没分类' +
               (tri.done ? '（已完成 ' + (tri.done / tri.total * 100).toFixed(1) + '%）' : '') + '。',
-        hint: '只看单词、凭第一印象归入三类。选「熟词」时会要求你翻开释义核对一次 —— ' +
-              '这道关卡决定整份档案准不准，别跳过。',
+        hint: '只看单词、凭第一印象在「生词 / 眼熟」中二选一。太简单的词先归眼熟，' +
+              '之后连续答对会自动升入熟词速过池，不用在这里纠结。',
         btn: tri.done === 0 ? '开始普查' : '继续普查',
         onclick: function () { go('triage'); },
         progress: { done: tri.done, total: tri.total }
@@ -282,10 +287,6 @@
     } else {
       if (rev.totalToday > 0) {
         let revHint = null;
-        if (rev.newL3 > 0) {
-          revHint = '另有 ' + fmtNum(rev.newL3) +
-            ' 个熟词等待排期，进入复习页时会一次性摊到未来一段时间里陆续巡检，不占今天的量。';
-        }
         if (rev.deferredBacklog > 0) {
           const per = rev.reviewCap === null ? rev.backlog : rev.reviewCap;
           const msg = '往日还有 ' + fmtNum(rev.deferredBacklog) + ' 个积压已顺延，' +
@@ -323,6 +324,23 @@
         }));
       }
     }
+
+    /* --- 熟词速过（独立模式，只处理 L3 熟词池，不占每日复习量） --- */
+    const rapid = window.Rapid.status();
+    box.appendChild(actionCard({
+      kicker: '熟词速过',
+      title: rapid.total ? ('速过熟词 · ' + rapid.total + ' 个待过') : '熟词速过池',
+      desc: rapid.total
+        ? ('原熟词 ' + rapid.legacy + ' · 新晋级 ' + rapid.promoted +
+           (rapid.archived ? ' · 已设永不复习 ' + rapid.archived : ''))
+        : '「眼熟」的词连续答对后会自动升进这里，可快速过，也能整屏勾选设为永不复习。',
+      hint: rapid.total
+        ? '认识就拉长间隔、不认识打回眼熟；也可以批量把过于简单的熟词设为永不复习。'
+        : null,
+      btn: '进入速过',
+      onclick: function () { go('rapid'); },
+      secondary: true
+    }));
 
     /* --- 今日数据 --- */
     box.appendChild(window.Charts.statTiles([
@@ -392,7 +410,8 @@
       { v: 'all',  t: '全部类别' },
       { v: '1',    t: 'L1 生词' },
       { v: '2',    t: 'L2 眼熟' },
-      { v: '3',    t: 'L3 熟词' },
+      { v: '3',    t: 'L3 熟词（速过池）' },
+      { v: 'archived', t: '永不复习' },
       { v: 'none', t: '未分类' },
       { v: 'due',  t: '今天到期' },
       { v: 'weak', t: '薄弱词（错≥2 或近30天掉级）' }
@@ -429,10 +448,13 @@
 
       const rows = all.filter(function (entry) {
         const card = st.cards[entry.word];
-        if (bookState.level === 'none') { if (card) return false; }
-        else if (bookState.level === 'due') { if (!card || !E.isDue(card, today)) return false; }
-        else if (bookState.level === 'weak') { if (!weakSet.has(entry.word)) return false; }
-        else if (bookState.level !== 'all') { if (!card || String(card.level) !== bookState.level) return false; }
+        const lvl = bookState.level;
+        if (lvl === 'none') { if (card) return false; }
+        else if (lvl === 'archived') { if (!card || !card.archived) return false; }
+        else if (lvl === 'due') { if (!card || !E.isDue(card, today)) return false; }
+        else if (lvl === 'weak') { if (!weakSet.has(entry.word)) return false; }
+        else if (lvl === 'all') { if (card && card.archived) return false; }
+        else { if (!card || card.archived || String(card.level) !== lvl) return false; }
 
         if (bookState.freq === 'tested' && !(window.WB.freqOf(entry) > 0)) return false;
         if (bookState.freq === 'never'  && !window.WB.isNeverTested(entry)) return false;
@@ -452,14 +474,27 @@
         el('span', { class: 'book-count', text: '共 ' + fmtNum(rows.length) + ' 个词' })
       ]);
       if (rows.length > 0 && rows.length <= 2000) {
-        const bulk = el('div', { class: 'bulk' }, [el('span', { text: '把这 ' + rows.length + ' 个词全部改为' })]);
-        [1, 2, 3].forEach(function (lv) {
+        if (bookState.level === 'archived') {
+          const bulk = el('div', { class: 'bulk' }, [el('span', { text: '对这 ' + rows.length + ' 个词' })]);
           bulk.appendChild(el('button', {
-            class: 'lv-pill lv-pill--' + lv, type: 'button', text: E.LEVELS[lv].name,
-            onclick: function () { bulkSet(rows, lv, refresh); }
+            class: 'btn btn--sm', type: 'button', text: '取消永不复习',
+            onclick: function () { bulkUnarchive(rows, refresh); }
           }));
-        });
-        head.appendChild(bulk);
+          head.appendChild(bulk);
+        } else {
+          const bulk = el('div', { class: 'bulk' }, [el('span', { text: '把这 ' + rows.length + ' 个词全部改为' })]);
+          [1, 2, 3].forEach(function (lv) {
+            bulk.appendChild(el('button', {
+              class: 'lv-pill lv-pill--' + lv, type: 'button', text: E.LEVELS[lv].name,
+              onclick: function () { bulkSet(rows, lv, refresh); }
+            }));
+          });
+          bulk.appendChild(el('button', {
+            class: 'btn btn--sm btn--ghost', type: 'button', text: '永不复习',
+            onclick: function () { bulkArchive(rows, refresh); }
+          }));
+          head.appendChild(bulk);
+        }
       }
       wrap.appendChild(head);
 
@@ -481,6 +516,14 @@
     }
 
     refresh();
+
+    /* 单词本管理（建/改名/删本、查看与移出收藏） */
+    if (window.NotebookUI) {
+      box.appendChild(el('div', { class: 'chart-card nb-manage' }, [
+        el('h3', { class: 'chart-head', text: '单词本管理' }),
+        window.NotebookUI.panel()
+      ]));
+    }
     return box;
   }
 
@@ -522,10 +565,13 @@
         : (window.WB.isNeverTested(entry)
             ? el('span', { class: 'w-freq w-freq--none', text: '0' })
             : null),
-      card
-        ? el('span', { class: 'lv-chip lv-chip--' + card.level, text: E.LEVELS[card.level].name })
-        : el('span', { class: 'lv-chip lv-chip--none', text: '未分类' }),
-      el('span', { class: 'w-due', text: card && card.active ? dueText(card) : '' })
+      (card && card.archived)
+        ? el('span', { class: 'lv-chip lv-chip--archived', text: '永不复习' })
+        : card
+          ? el('span', { class: 'lv-chip lv-chip--' + card.level, text: E.LEVELS[card.level].name +
+              (card.level === 3 ? '·' + ((card.l3Origin || 'legacy') === 'promoted' ? '晋级' : '原熟') : '') })
+          : el('span', { class: 'lv-chip lv-chip--none', text: '未分类' }),
+      el('span', { class: 'w-due', text: (card && card.active && !card.archived) ? dueText(card) : '' })
     ]);
     li.appendChild(main);
 
@@ -572,6 +618,44 @@
         }));
       }
       detail.appendChild(tools);
+
+      const tools2 = el('div', { class: 'row-tools' });
+      if (window.NotebookUI) {
+        tools2.appendChild(el('button', {
+          class: 'btn btn--sm', type: 'button', text: '加入单词本…',
+          onclick: function () { window.NotebookUI.openPicker(entry.word); }
+        }));
+      }
+      if (card) {
+        if (card.archived) {
+          tools2.appendChild(el('button', {
+            class: 'btn btn--sm', type: 'button', text: '取消永不复习',
+            onclick: function () {
+              E.unarchive(card);
+              S.save(); S.snapshotLevels(E.levelCounts(S.get().cards));
+              window.UI.toast(entry.word + ' 已恢复，会重新参与复习', 'good');
+              refresh();
+            }
+          }));
+        } else {
+          tools2.appendChild(el('button', {
+            class: 'btn btn--sm btn--ghost', type: 'button', text: '设为永不复习',
+            onclick: function () {
+              E.archive(card);
+              S.save(); S.snapshotLevels(E.levelCounts(S.get().cards));
+              window.UI.toast(entry.word + ' 已设为永不复习', 'info');
+              refresh();
+            }
+          }));
+        }
+      }
+      detail.appendChild(tools2);
+
+      const inNbs = S.notebooksOfWord(entry.word);
+      if (inNbs.length) {
+        detail.appendChild(el('p', { class: 'muted word-nbs',
+          text: '所在单词本：' + inNbs.map(function (n) { return n.name; }).join('、') }));
+      }
       li.appendChild(detail);
     }
     return li;
@@ -605,6 +689,40 @@
       window.UI.toast('已把 ' + rows.length + ' 个词改为「' + E.LEVELS[lv].name + '」', 'good');
       refresh();
     });
+  }
+
+  function bulkArchive(rows, refresh) {
+    window.UI.confirmDialog({
+      title: '批量设为永不复习',
+      body: '把当前筛选出的 <b>' + rows.length + '</b> 个词设为永不复习？<br><br>' +
+            '<span class="muted">它们会从所有复习与速过中移除，单词和进度保留，可在此筛选「永不复习」恢复。</span>',
+      okText: '设为永不复习'
+    }).then(function (ok) {
+      if (!ok) return;
+      const st = S.get();
+      let n = 0;
+      rows.forEach(function (entry) {
+        const c = st.cards[entry.word];
+        if (c && !c.archived) { E.archive(c); n++; }
+      });
+      S.save();
+      S.snapshotLevels(E.levelCounts(st.cards));
+      window.UI.toast('已将 ' + n + ' 个词设为永不复习', 'good');
+      refresh();
+    });
+  }
+
+  function bulkUnarchive(rows, refresh) {
+    const st = S.get();
+    let n = 0;
+    rows.forEach(function (entry) {
+      const c = st.cards[entry.word];
+      if (c && c.archived) { E.unarchive(c); n++; }
+    });
+    S.save();
+    S.snapshotLevels(E.levelCounts(st.cards));
+    window.UI.toast('已恢复 ' + n + ' 个词，它们会重新参与复习', 'good');
+    refresh();
   }
 
   function select(label, value, options, onchange) {
@@ -693,7 +811,7 @@
 
     g1.appendChild(rangeField('选择题比例', s.quizRatio, function (v) {
       s.quizRatio = v; S.save();
-    }, '0 = 全部用翻卡自评，1 = 尽量出选择题。L3 熟词的选择题比例会自动减半。'));
+    }, '0 = 全部用翻卡自评，1 = 尽量出选择题。只作用于生词/眼熟两类的主复习。'));
     box.appendChild(g1);
 
     /* --- 流程 --- */
@@ -706,11 +824,6 @@
     g2.appendChild(checkField('翻面时自动朗读', s.autoSpeak, function (v) {
       s.autoSpeak = v; S.save();
     }, window.Speak.available() ? null : '当前浏览器不支持语音合成，这个开关不会生效。'));
-
-    g2.appendChild(checkField('熟词不参与巡检', s.skipL3Patrol, function (v) {
-      s.skipL3Patrol = v; S.save();
-    }, '开启后熟词彻底不进复习、不占任何时间。' +
-       '代价是「自以为会、其实不会」的熟词不会被抓出来，只在答错降级时回来。'));
     box.appendChild(g2);
 
     /* --- 外观 --- */
@@ -873,8 +986,7 @@
 
   function quotaField(s) {
     const wrap = el('div', { class: 'quota-row' });
-    /* 只放 L1/L2 两个输入框 —— L3 熟词不占新词配额，
-       留一个不起作用的旋钮在这里只会误导人 */
+    /* 主复习只有 L1/L2，配额也只放这两个；L3 熟词在独立的速过模式里处理 */
     [1, 2].forEach(function (lv) {
       const i = lv - 1;
       const inp = el('input', { class: 'input input--num input--tiny', type: 'number',
@@ -900,9 +1012,9 @@
       ]));
     });
     return field('新词投放配额（生词 : 眼熟）', wrap,
-      '每日新词按这个比例分给生词和眼熟词。' +
-      '熟词不占这个额度 —— 它们不进当天的学习队列，投放成本是零，' +
-      '进复习页时会一次性排期、把首次巡检日摊到未来一段时间里，避免某天集中爆量。');
+      '每日新词按这个比例分给生词和眼熟。熟词不在主复习里 —— ' +
+      '眼熟词连续答对后会自动升入「熟词速过池」，在首页的熟词速过模式里单独快速过，' +
+      '或整屏勾选设为永不复习。');
   }
 
   /* ---------------------------------------------------------------- 备份 */

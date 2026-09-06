@@ -69,16 +69,20 @@ section('L1 生词：连续「认识」的间隔序列');
 (function () {
   const c = E.createCard(1);
   const seq = [];
-  let promptAt = -1;
+  let upAt = -1, upEv = null;
   for (let i = 1; i <= 5; i++) {
     const r = E.grade(c, 'good', 'l1word');
     seq.push(c.interval);
-    if (r.events.some(function (e) { return e.type === 'upgrade-prompt'; })) promptAt = i;
+    const ev = r.events.filter(function (e) { return e.type === 'upgrade'; })[0];
+    if (ev) { upAt = i; upEv = ev; }
   }
-  // initial=1，之后每步 ×1.6 四舍五入：1 → 2 → 3 → 5 → 8
-  check('间隔序列为 1,2,3,5,8', eq(seq, [1, 2, 3, 5, 8]), '实际 ' + seq.join(','));
-  // 升级门槛 streak>=3 且 interval>=7：第 5 步 interval=8 才满足
-  check('第 5 次（interval=8）才弹 L1→L2 升级', promptAt === 5, '实际第 ' + promptAt + ' 次');
+  // L1 initial=1、growth=1.5：1 → 2 → 3 → 5；第 4 次 interval=5 达标升 L2，
+  // 第 5 次起按 L2 growth=2.2：5 → 11
+  check('L1 序列 1,2,3,5，升 L2 后跳到 11', eq(seq, [1, 2, 3, 5, 11]), '实际 ' + seq.join(','));
+  // 升级门槛 streak>=3 且 interval>=5：第 3 次 interval=3 不够，第 4 次 interval=5 达标
+  check('第 4 次（interval=5）自动 L1→L2',
+        upAt === 4 && upEv && upEv.from === 1 && upEv.to === 2, '实际第 ' + upAt + ' 次');
+  check('自动升级立即生效、无需确认弹窗', c.level === 2, '实际 level=' + c.level);
 })();
 
 /* ============================================================ 2. ease 下限 */
@@ -100,7 +104,7 @@ section('间隔上限：MAX_INTERVAL = 180 天');
 (function () {
   const c = E.createCard(1);
   c.reps = 1;
-  c.interval = 170;                 // 170 × 1.6 = 272，应被钳到 180
+  c.interval = 170;                 // 170 × 1.5 = 255，应被钳到 180
   E.grade(c, 'good');
   check('170 天再「认识」后被钳到 180', c.interval === 180, '实际 ' + c.interval);
 
@@ -127,7 +131,7 @@ section('L2 眼熟：本级累计两次答错降级到 L1');
   check('  换级后本级答错计数清零', c.lvLapses === 0, '实际 ' + c.lvLapses);
 })();
 
-section('L3 熟词：答错一次立即降到 L2');
+section('L3 熟词：答错一次立即降到 L2（速过「不认识」走这条）');
 
 (function () {
   const c = E.createCard(3);
@@ -135,6 +139,70 @@ section('L3 熟词：答错一次立即降到 L2');
   check('L3 again 后 level=2', c.level === 2, '实际 ' + c.level);
   check('  带一条 downgrade(3→2) 事件',
         r.events[0] && r.events[0].type === 'downgrade' && r.events[0].to === 2);
+})();
+
+/* ============================================================ 4b. L2→L3 自动升级 */
+
+section('L2 眼熟：连对达标自动升入熟词速过池并标 promoted');
+
+(function () {
+  const c = E.createCard(2);
+  const seq = [];
+  let upAt = -1, upEv = null;
+  for (let i = 1; i <= 3; i++) {
+    const r = E.grade(c, 'good', 'l2word');
+    seq.push(c.interval);
+    const ev = r.events.filter(function (e) { return e.type === 'upgrade'; })[0];
+    if (ev) { upAt = i; upEv = ev; }
+  }
+  // L2 initial=5、growth=2.2：5 → 11 → 24；第 3 次 streak=3 且 interval=24>=21 升 L3
+  check('L2 序列 5,11,24', eq(seq, [5, 11, 24]), '实际 ' + seq.join(','));
+  check('第 3 次自动 L2→L3', upAt === 3 && upEv && upEv.to === 3, '实际第 ' + upAt + ' 次');
+  check('升入 L3 后标记 l3Origin=promoted', c.l3Origin === 'promoted', '实际 ' + c.l3Origin);
+})();
+
+section('L1 与 L2 频率差：同期眼熟间隔远大于生词（出现频率明显更低）');
+
+(function () {
+  const a = E.createCard(1), l1 = [];
+  for (let i = 0; i < 3; i++) { E.grade(a, 'good'); l1.push(a.interval); }
+  const b = E.createCard(2), l2 = [];
+  for (let i = 0; i < 3; i++) { E.grade(b, 'good'); l2.push(b.interval); }
+  check('L1 三次后间隔仅 3 天', eq(l1, [1, 2, 3]), '实际 ' + l1.join(','));
+  check('L2 三次后间隔 24 天，是 L1 的 5 倍以上', l2[2] >= l1[2] * 5,
+        'L1=' + l1[2] + ' L2=' + l2[2]);
+})();
+
+/* ============================================================ 4c. 永不复习 */
+
+section('永不复习：archive 后被一切调度排除，可恢复');
+
+(function () {
+  const today = S.today();
+  const c = E.createCard(1); E.activate(c, 0);
+  const cards = { x: c };
+  check('未归档时到期', E.isDue(c, today));
+  E.archive(c);
+  check('archived=true 且记归档日', c.archived === true && !!c.archivedAt);
+  check('归档后 isDue=false', !E.isDue(c, today));
+  check('levelCounts 排除归档（全 0）', eq(E.levelCounts(cards), [0, 0, 0]),
+        JSON.stringify(E.levelCounts(cards)));
+  check('archivedCount=1', E.archivedCount(cards) === 1);
+  check('masteryBucket 归类为 archived', E.masteryBucket(c) === 'archived');
+  E.unarchive(c);
+  check('恢复后重新到期', E.isDue(c, today) && !c.archived);
+})();
+
+section('速过评分：L3「认识」只拉长不升级');
+
+(function () {
+  const c = E.createCard(3);
+  c.active = true; c.reps = 1; c.interval = 20;
+  const before = c.interval;
+  const r = E.grade(c, 'good');
+  check('L3 good 后仍是 L3（无第 4 级可升）', c.level === 3);
+  check('间隔被拉长', c.interval > before, before + ' → ' + c.interval);
+  check('不产生升级事件', !r.events.some(function (e) { return e.type === 'upgrade'; }));
 })();
 
 /* ============================================================ 5. good/easy 对比 */
@@ -177,8 +245,8 @@ section('hard：勉强答对不清零连对、也不增加');
 section('multiplier：默认 ease 时倍数恰等于类别 growth');
 
 (function () {
-  check('L1 ×1.6', Math.abs(E.multiplier(1, 2.5) - 1.6) < 1e-9);
-  check('L2 ×2.0', Math.abs(E.multiplier(2, 2.5) - 2.0) < 1e-9);
+  check('L1 ×1.5', Math.abs(E.multiplier(1, 2.5) - 1.5) < 1e-9);
+  check('L2 ×2.2', Math.abs(E.multiplier(2, 2.5) - 2.2) < 1e-9);
   check('L3 ×2.5', Math.abs(E.multiplier(3, 2.5) - 2.5) < 1e-9);
   check('ease 掉到下限时倍数仍 > 1（间隔不倒退）', E.multiplier(1, 1.3) > 1);
 })();

@@ -104,7 +104,7 @@ section('复习规划：今天到期全保留，往日积压按上限截取，�
   resetState();
   const st = S.get();
   st.settings.dailyNew = 0;          // 不投新词，只看复习
-  st.settings.quota = [6, 3, 1];
+  st.settings.quota = [6, 3];
   for (let i = 1; i <= 20; i++) dueCard('over' + i, 1, -i);  // 20 个积压
   dueCard('today1', 1, 0); dueCard('today2', 2, 0); dueCard('today3', 1, 0);
 
@@ -155,6 +155,48 @@ section('effectiveLimit：临考停新词、复习负载高时少投新词');
   // capacity=max(40, 90*2)=180，新词=min(90, round(180-100)=80)=80
   const lim = R.effectiveLimit(st, 900);
   check('复习负载高（预测日均 100）时新词从 90 下调到 80', lim === 80, '实际 ' + lim);
+})();
+
+/* ============= 4. shouldFinish：以真实卡为口径，修「学满还冒卡」 ============ */
+
+section('结束判定：真实卡评完立即结束，again 重学副本不再把队列拖住');
+
+(function () {
+  const f = R.shouldFinish;
+  check('刚开始不结束', f(0, 47, 1, 47) === false);
+  check('评了 46/47（物理队列因 again 副本变长为 48）不结束',
+        f(46, 47, 47, 48) === false);
+  check('最后一张真实卡评完即结束，哪怕后面还压着副本',
+        f(47, 47, 47, 48) === true);
+  check('无副本时正常走到物理末尾也结束', f(47, 47, 47, 47) === true);
+  check('物理队列走到尽头兜底结束', f(5, 47, 47, 47) === true);
+})();
+
+section('两类配额分配：按 6:3，某类不足时余量回流给另一类');
+
+(function () {
+  const a = R.allocate(9, [6, 3], [100, 100]);
+  check('名额充足时严格 6:3 = [6,3]', a[0] === 6 && a[1] === 3, JSON.stringify(a));
+  const b = R.allocate(9, [6, 3], [2, 100]);
+  check('L1 只有 2 个，剩余 4 个回流给 L2 = [2,7]', b[0] === 2 && b[1] === 7,
+        JSON.stringify(b));
+})();
+
+section('主复习 status：L3 熟词与归档词都不计入今日队列');
+
+(function () {
+  resetState();
+  const st = S.get();
+  st.settings.dailyNew = 0;
+  dueCard('l3a', 3, 0);     // L3 今天到期 —— 应被排除，去速过模式
+  dueCard('l3b', 3, -2);
+  dueCard('l1a', 1, 0);     // 只有这张算主复习到期
+  const arc = dueCard('arc', 1, 0);
+  E.archive(arc);           // 归档词同样排除
+  const r = R.status();
+  check('到期只数 L1 那张（=1），L3 与归档都不算', r.due === 1, '实际 ' + r.due);
+  check('不再返回 newL3 字段', r.newL3 === undefined);
+  check('未学新词也只统计 L1/L2', r.unlearned === 0, '实际 ' + r.unlearned);
 })();
 
 /* ------------------------------------------------------------- 结果 */

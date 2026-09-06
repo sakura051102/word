@@ -178,6 +178,65 @@ section('学习记录导出 CSV：BOM / CRLF / 升序 / 正确率');
   check('今天正确率 100', lines[2].split(',')[6] === '100', lines[2]);
 })();
 
+/* ============================================ v1 → v2 迁移：两类化 + 熟词来源 */
+
+section('v1 老存档迁移到 v2：配额两类、删 skipL3Patrol、现存 L3 标 legacy、初始化单词本');
+
+(function () {
+  const v1 = {
+    version: 1,
+    settings: { quota: [6, 3, 1], skipL3Patrol: true, dailyNew: 30 },
+    triage: { cursor: 5 },
+    cards: {
+      oldL3: { level: 3, active: true, interval: 20, reps: 1 },
+      oldL1: { level: 1, active: false }
+    },
+    daily: {}, levelSnap: {}, upgradeSnooze: {}
+  };
+  const env = freshStore({ kaoyan_vocab_v1: JSON.stringify(v1) });
+  const st = env.S.load();
+  check('版本升到 2', st.version === 2, '实际 ' + st.version);
+  check('配额收成两类 [6,3]',
+        Array.isArray(st.settings.quota) && st.settings.quota.length === 2 &&
+        st.settings.quota[0] === 6 && st.settings.quota[1] === 3,
+        JSON.stringify(st.settings.quota));
+  check('skipL3Patrol 被移除', st.settings.skipL3Patrol === undefined);
+  check('现存 L3 标为 legacy（原熟词）', st.cards.oldL3.l3Origin === 'legacy',
+        String(st.cards.oldL3.l3Origin));
+  check('L1 卡不被误标来源', !st.cards.oldL1.l3Origin);
+  check('卡片补 archived=false', st.cards.oldL3.archived === false && st.cards.oldL1.archived === false);
+  check('迁移不丢卡（L3 仍在）', st.cards.oldL3.level === 3);
+  check('初始化空单词本容器', st.notebooks && typeof st.notebooks === 'object' &&
+        Object.keys(st.notebooks).length === 0);
+})();
+
+/* ====================================================== 单词本 CRUD */
+
+section('单词本：多本、一词多本、去重、改名删本');
+
+(function () {
+  const env = freshStore();
+  const S = env.S; S.load();
+  const nb = S.createNotebook('阅读');
+  check('创建返回带 id 的本', !!(nb && nb.id));
+  check('空白名称创建失败（null）', S.createNotebook('   ') === null);
+  check('当前 1 本', S.listNotebooks().length === 1);
+  check('首次加入返回 true', S.addWordToNotebook(nb.id, 'apple') === true);
+  check('重复加入去重返回 false', S.addWordToNotebook(nb.id, 'apple') === false);
+  check('本内计数为 1', S.getNotebook(nb.id).words.length === 1);
+
+  const nb2 = S.createNotebook('写作');
+  check('再建一本共 2 本', S.listNotebooks().length === 2);
+  S.addWordToNotebook(nb2.id, 'apple');
+  check('一个词可同时进多本', S.notebooksOfWord('apple').length === 2);
+  check('从第一本移除', S.removeWordFromNotebook(nb.id, 'apple') === true);
+  check('移除后该词仍留在另一本', S.notebooksOfWord('apple').length === 1);
+  check('改名成功', S.renameNotebook(nb.id, '阅读高频') === true &&
+        S.getNotebook(nb.id).name === '阅读高频');
+  check('删除本成功', S.removeNotebook(nb.id) === true && S.listNotebooks().length === 1);
+  check('向不存在的本加词失败', S.addWordToNotebook('nope', 'x') === false);
+})();
+
 /* ------------------------------------------------------------- 结果 */
 
 console.log('\n' + '='.repeat(46));

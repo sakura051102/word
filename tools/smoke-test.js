@@ -266,7 +266,8 @@ function load(rel) {
 [
   'data/sample.js', 'data/wordbook.js', 'data/corpus.js',
   'js/store.js', 'js/engine.js', 'js/wordbook.js', 'js/fx.js',
-  'js/ui.js', 'js/charts.js', 'js/triage.js', 'js/review.js', 'js/app.js'
+  'js/ui.js', 'js/charts.js', 'js/notebook.js', 'js/triage.js',
+  'js/review.js', 'js/rapid.js', 'js/app.js'
 ].forEach(load);
 
 /* app.js 在 readyState==='complete' 时会立刻 boot() */
@@ -302,7 +303,7 @@ check(REDUCED ? 'FX 按预期整体空转' : 'FX 已初始化且未因环境降�
 
 /* ---------------------------------------------------------------- 普查 */
 
-section('普查：定级 / 核对 / 回退');
+section('普查：两类定级 / 键盘 / 回退');
 
 const startBtn = queryAll(main, '.action-card .btn')[0];
 check('首页有「开始普查」按钮', !!startBtn);
@@ -314,7 +315,7 @@ check('显示了第一个词 (' + firstWord + ')', !!firstWord);
 
 // 点「生词」
 const lvBtns = queryAll(main, '.lv-btn');
-check('有三个定级按钮', lvBtns.length === 3);
+check('只有两个定级按钮（生词 / 眼熟）', lvBtns.length === 2, '实际 ' + lvBtns.length);
 lvBtns[0].click();
 check('L1 定级后已建卡', !!S.getCard(firstWord));
 check('  卡片 level = 1', S.getCard(firstWord).level === 1);
@@ -325,27 +326,18 @@ const w2 = queryAll(main, '.word-text')[0].textContent;
 doc.dispatch('keydown', { key: '2' });
 check('键盘「2」定级为 L2', S.getCard(w2) && S.getCard(w2).level === 2);
 
-// L3 要先过核对关
+// 只有两类：按「3」不再产生任何定级
 const w3 = queryAll(main, '.word-text')[0].textContent;
 doc.dispatch('keydown', { key: '3' });
-check('选 L3 先进入核对页', queryAll(main, '.verify-banner').length === 1);
-check('  核对页尚未建卡（关卡生效）', !S.getCard(w3));
-doc.dispatch('keydown', { key: 'Enter' });
-check('确认后建卡为 L3', S.getCard(w3) && S.getCard(w3).level === 3);
-
-// 核对页选「其实不确定」→ 归 L2
-const w4 = queryAll(main, '.word-text')[0].textContent;
-queryAll(main, '.lv-btn')[2].click();
-const downBtn = queryAll(main, '.verify-actions .btn')[1];
-check('核对页有「归为眼熟」按钮', !!downBtn);
-downBtn.click();
-check('降档后 level = 2', S.getCard(w4) && S.getCard(w4).level === 2);
+check('按「3」不再定级（普查只有两类）', !S.getCard(w3));
+queryAll(main, '.lv-btn')[1].click();
+check('点「眼熟」建卡为 L2', S.getCard(w3) && S.getCard(w3).level === 2);
 
 // 回退
 const before = queryAll(main, '.word-text')[0].textContent;
 doc.dispatch('keydown', { key: 'ArrowLeft' });
-check('回退后卡片被撤销', !S.getCard(w4));
-check('  回退到了刚才那个词', queryAll(main, '.word-text')[0].textContent === w4,
+check('回退后卡片被撤销', !S.getCard(w3));
+check('  回退到了刚才那个词', queryAll(main, '.word-text')[0].textContent === w3,
       '现在是 ' + queryAll(main, '.word-text')[0].textContent + '，回退前是 ' + before);
 
 /* ---------------------------------------------------------------- 复习 */
@@ -574,7 +566,7 @@ check('设置页出现「真题语料」信息组',
 
 /* ---------------------------------------------------------------- 冲刺面板 */
 
-section('冲刺面板 + 自动节奏 + 跳过巡检');
+section('冲刺面板 + 自动节奏 + L3 不进主复习');
 
 /* 造一个干净、可预测的存档：reset 后手工铺卡片。
    30 个 L1（active、reps=0），20 个 L2（active、reps=1），
@@ -602,7 +594,6 @@ for (let i = 50; i < 55; i++) st2.cards[defWords[i].word] = mkCard(3, 1, true); 
 for (let i = 55; i < 60; i++) st2.cards[defWords[i].word] = mkCard(3, 0, false);  // L3 未激活
 st2.settings.examDate = S.addDays(S.today(), 100);
 st2.settings.autoPace = true;
-st2.settings.skipL3Patrol = true;
 st2.settings.reviewBeforeTriageDone = true;   // 让首页显示「开始复习」入口
 S.save();
 
@@ -628,14 +619,14 @@ const sSub = queryAll(main, '.sprint-sub')[0];
 check('  全部已学时每日目标为 0', !!sSub && sSub.textContent.indexOf('0 词') >= 0,
       sSub ? sSub.textContent : '没找到 .sprint-sub');
 
-/* skipL3Patrol：进入复习，尚未激活的 L3 词不应被 activate
+/* 主复习只跑 L1/L2：进入复习，未激活的 L3 词不应被 activate、也不应进队列
    （55-59 是 inactive 的 L3，用 57 验证） */
 const l3word = defWords[57].word;
 const wasInactive = st2.cards[l3word].active === false;
 queryAll(main, '.action-card .btn').filter(function (b) {
   return b.textContent.indexOf('复习') >= 0;
 })[0].click();
-check('  skipL3Patrol 时 L3 词保持未激活', wasInactive && st2.cards[l3word].active === false,
+check('  主复习不激活、不投放 L3 词', wasInactive && st2.cards[l3word].active === false,
       'L3 词被意外激活了');
 
 /* 自动节奏：effectiveLimit 应随剩余词数动态变化，这里 0 个未学 → 上限 0 */
@@ -645,7 +636,6 @@ check('  自动节奏下无未学词时新词上限为 0', win.Review.status().b
 /* 恢复默认设置，避免污染后续（本测试是最后一段，其实无所谓，但保持干净） */
 st2.settings.examDate = null;
 st2.settings.autoPace = true;
-st2.settings.skipL3Patrol = false;
 S.save();
 
 /* ---------------------------------------------------------------- 再加量 */
@@ -690,6 +680,56 @@ S.get().settings.dailyNew = 30;
 S.save();
 check('  extraNew 是当天性的：跨天后回落回 30', win.Review.status().limit === 30,
       'limit=' + win.Review.status().limit);
+
+/* ---------------------------------------------------------------- 熟词速过 + 单词本 */
+
+section('熟词速过：双来源计数 / 认识拉长 / 不认识打回 L2；单词本工具条');
+
+S.reset();
+(function () {
+  const stR = S.get();
+  function mkL3(origin, i) {
+    const c = win.Engine.createCard(3);
+    c.active = true; c.l3Origin = origin; c.interval = 20; c.reps = 1; c.due = S.today();
+    stR.cards[win.WB.at(i).word] = c;
+  }
+  for (let i = 0; i < 3; i++) mkL3('legacy', i);     // 3 个原熟词
+  for (let i = 3; i < 5; i++) mkL3('promoted', i);   // 2 个新晋级
+  S.save();
+
+  const rs = win.Rapid.status();
+  check('速过状态 legacy=3 / promoted=2 / total=5',
+        rs.legacy === 3 && rs.promoted === 2 && rs.total === 5, JSON.stringify(rs));
+
+  const nb = S.createNotebook('冒烟本');
+  const w0 = win.WB.at(0).word;
+  check('单词本可建、可加词、一词可查所在本',
+        S.addWordToNotebook(nb.id, w0) === true && S.notebooksOfWord(w0).length === 1);
+  const barNode = win.NotebookUI.bar(win.WB.at(0));
+  check('卡片上的单词本工具条可构建',
+        !!barNode && queryAll(barNode, '.nb-add-btn').length === 1);
+
+  queryAll(nav, '.tab')[0].click();
+  const rapidBtn = queryAll(main, '.action-card .btn').filter(function (b) {
+    return b.textContent.indexOf('速过') >= 0;
+  })[0];
+  check('首页有「进入速过」按钮', !!rapidBtn);
+  rapidBtn.click();
+  check('进入速过菜单', queryAll(main, '.rapid-menu').length === 1);
+
+  queryAll(main, '.rapid-start--legacy')[0].click();
+  check('开始原熟词速过出现速过卡', queryAll(main, '.rapid-card').length === 1);
+  check('  初始进度 1 / 3', queryAll(main, '.rp-count')[0].textContent === '1 / 3',
+        queryAll(main, '.rp-count')[0].textContent);
+
+  queryAll(main, '.rapid-btn--yes')[0].click();    // 认识第 1 张
+  check('认识后推进到 2 / 3', queryAll(main, '.rp-count')[0].textContent === '2 / 3');
+  check('  L3「认识」后仍是 L3（只拉长）', stR.cards[w0].level === 3 && stR.cards[w0].interval > 20);
+
+  const w1 = win.WB.at(1).word;
+  queryAll(main, '.rapid-btn--no')[0].click();     // 不认识第 2 张
+  check('「不认识」打回 L2 眼熟', stR.cards[w1].level === 2, '实际 ' + stR.cards[w1].level);
+})();
 
 /* 还原，避免污染统计页测试环境 */
 S.reset();
