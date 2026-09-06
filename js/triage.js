@@ -1,13 +1,10 @@
 /* ===========================================================================
  *  triage.js —— 普查（阶段一）
  * ---------------------------------------------------------------------------
- *  把整本词表过一遍，每个词归入 L1 生词 / L2 眼熟 / L3 熟词。
- *
- *  关键设计：点「熟词」时【强制核对】—— 翻开释义确认真的知道才归档。
- *  只看单词就点「基本不会忘」太容易把「眼熟」当成「会」，
- *  而整个复习计划都建立在这份档案之上，档案不准后面全歪。
- *  核对时只给释义，例句/搭配/真题原句一概不显示 ——
- *  这一步要重复五千多次，每多一行都会被放大五千倍。
+ *  把整本词表过一遍，每个词只归入 L1 生词 / L2 眼熟两类。
+ *  L3 熟词不在普查里产生：太简单的词先归「眼熟」，之后在复习里连续答对
+ *  会自动升入「熟词速过池」，也可以在熟词速过模式里批量设为永不复习。
+ *  普查只看单词、凭第一印象二选一，这一步要重复五千多次，越快越好。
  * =========================================================================== */
 
 window.Triage = (function () {
@@ -24,11 +21,10 @@ window.Triage = (function () {
 
   function newSession() {
     return {
-      mode: 'card',        // card | verify | batchdone | alldone
-      pendingLevel: null,  // verify 阶段暂存的待确认级别
+      mode: 'card',        // card | batchdone | alldone
       sessionCount: 0,     // 本次会话已分类数
       batchCount: 0,       // 本批已分类数
-      batchTally: [0, 0, 0],
+      batchTally: [0, 0],  // [L1, L2]
       history: []          // {index, word, prevCard} —— 支持回退
     };
   }
@@ -71,13 +67,13 @@ window.Triage = (function () {
    * 中间没有对错、没有分数，只有重复的三选一。所以这里的即时反馈
    * 比复习页更重要：它是唯一能让「我又推进了一个」被感知到的东西。
    *
-   * 颜色跟着 L1/L2/L3 的序数色阶走，和按钮左边那道竖线是同一套语义。
+   * 颜色跟着 L1/L2 的序数色阶走，和按钮左边那道竖线是同一套语义。
    * 同样必须在 render() 之前调用，否则按钮已经被重绘换掉了。
    */
   function classifyFx(level, srcEl) {
     const FX = window.FX;
     if (!FX || FX.off || !srcEl) return;
-    const kind = level === 3 ? 'great' : level === 2 ? 'neutral' : 'good';
+    const kind = level === 2 ? 'neutral' : 'good';
     FX.burst(srcEl, { kind: kind, count: 12 + level * 3, power: 70 + level * 14 });
     FX.ring(srcEl, kind);
   }
@@ -85,14 +81,6 @@ window.Triage = (function () {
   function classify(level, srcEl) {
     const cur = current();
     if (!cur) return;
-
-    // L3 必须先过核对这一关
-    if (level === 3 && sess.mode === 'card') {
-      sess.pendingLevel = 3;
-      sess.mode = 'verify';
-      render();
-      return;
-    }
     classifyFx(level, srcEl);
     commit(cur, level);
   }
@@ -115,7 +103,6 @@ window.Triage = (function () {
     sess.sessionCount++;
     sess.batchCount++;
     sess.batchTally[level - 1]++;
-    sess.pendingLevel = null;
 
     snapshot();
 
@@ -163,7 +150,6 @@ window.Triage = (function () {
     if (sess.batchCount > 0)   sess.batchCount--;
 
     sess.mode = 'card';
-    sess.pendingLevel = null;
     S.save();
     snapshot();
     render();
@@ -194,7 +180,6 @@ window.Triage = (function () {
     else {
       const cur = current();
       if (!cur) { stage.appendChild(viewAllDone()); }
-      else if (sess.mode === 'verify') stage.appendChild(viewVerify(cur));
       else {
         const node = viewCard(cur);
         stage.appendChild(node);
@@ -204,7 +189,7 @@ window.Triage = (function () {
       }
     }
 
-    if (sess.mode === 'card' || sess.mode === 'verify') {
+    if (sess.mode === 'card') {
       host.appendChild(footer());
     }
   }
@@ -238,8 +223,7 @@ window.Triage = (function () {
     const actions = el('div', { class: 'triage-actions' });
     [
       { lv: 1, name: '生词', hint: '完全不熟' },
-      { lv: 2, name: '眼熟', hint: '有印象但会忘' },
-      { lv: 3, name: '熟词', hint: '基本不会忘' }
+      { lv: 2, name: '眼熟', hint: '有印象但会忘' }
     ].forEach(function (o) {
       /* 先建节点再挂监听：特效要用按钮本身当坐标锚点，
          el() 的 onclick 简写拿不到这个引用 */
@@ -255,65 +239,24 @@ window.Triage = (function () {
 
     if (window.Speak.available()) {
       box.appendChild(el('p', { class: 'keyhint',
-        text: '快捷键：1 / 2 / 3 分类　S 朗读　← 回退' }));
+        text: '快捷键：1 / 2 分类　S 朗读　← 回退' }));
     } else {
-      box.appendChild(el('p', { class: 'keyhint', text: '快捷键：1 / 2 / 3 分类　← 回退' }));
+      box.appendChild(el('p', { class: 'keyhint', text: '快捷键：1 / 2 分类　← 回退' }));
     }
-    return box;
-  }
-
-  /* --- 熟词核对：翻开释义，确认真的知道 --- */
-  function viewVerify(cur) {
-    const entry = cur.entry;
-    const box = el('div', { class: 'triage-card triage-card--verify' });
-
-    box.appendChild(window.DefsView.head(entry, { big: true }));
-    box.appendChild(el('div', { class: 'verify-banner',
-      text: '你选了「熟词」。核对一下 —— 下面这些意思，刚才真的想起来了吗？' }));
-
-    // 普查要过 5530 个词，这一步必须快 ——
-    // 只给释义，例句/搭配/相关词/真题原句全部关掉。
-    // 判断「我认不认识这个词」不需要那些，多一行都是在拖慢节奏。
-    box.appendChild(window.DefsView.render(entry, {
-      showExtras: false, showExamples: false, showPhrases: false, showCites: false
-    }));
-
-    const acts = el('div', { class: 'verify-actions' });
-
-    /* 「确认，我知道」走的是 commit() 而不是 classify()，
-       所以定级特效得在这里单独放一次 —— 否则整个普查里最该有成就感的
-       一步（确认一个熟词）反而是唯一没有反馈的。 */
-    const okBtn = el('button', { class: 'btn btn--primary', type: 'button' },
-      [el('span', { text: '确认，我知道' }), el('kbd', { text: 'Enter' })]);
-    okBtn.addEventListener('click', function () {
-      classifyFx(3, okBtn);
-      commit(cur, 3);
-    });
-    acts.appendChild(okBtn);
-
-    const downBtn = el('button', { class: 'btn', type: 'button' },
-      [el('span', { text: '其实不太确定 → 归为眼熟' }), el('kbd', { text: 'Esc' })]);
-    downBtn.addEventListener('click', function () {
-      classifyFx(2, downBtn);
-      commit(cur, 2);
-    });
-    acts.appendChild(downBtn);
-
-    box.appendChild(acts);
     return box;
   }
 
   /* --- 批次小结 --- */
   function viewBatchDone() {
     const t = sess.batchTally;
-    const sum = t[0] + t[1] + t[2] || 1;
+    const sum = t[0] + t[1] || 1;
     const box = el('div', { class: 'triage-done' }, [
       el('h2', { text: '这一批完成了' }),
-      el('p', { class: 'muted', text: '本批 ' + (t[0] + t[1] + t[2]) + ' 个词的分布：' })
+      el('p', { class: 'muted', text: '本批 ' + (t[0] + t[1]) + ' 个词的分布：' })
     ]);
 
     const bar = el('div', { class: 'stack-bar' });
-    [1, 2, 3].forEach(function (lv) {
+    [1, 2].forEach(function (lv) {
       const n = t[lv - 1];
       if (!n) return;
       bar.appendChild(el('div', {
@@ -340,7 +283,7 @@ window.Triage = (function () {
         class: 'btn btn--primary', type: 'button', text: '继续下一批',
         onclick: function () {
           sess.batchCount = 0;
-          sess.batchTally = [0, 0, 0];
+          sess.batchTally = [0, 0];
           sess.mode = 'card';
           render();
         }
@@ -361,7 +304,8 @@ window.Triage = (function () {
       el('h2', { text: '普查完成' }),
       el('p', { text: '全部 ' + fmtNum(total) + ' 个词已建档。现在可以开始复习了 ——' }),
       el('p', { class: 'muted',
-        text: 'L1 和 L2 会拿到大部分时间，L3 只做低频巡检。复习中答错的词会自动降级。' })
+        text: '日常复习只学生词和眼熟两类：生词连对会降为眼熟，眼熟答错会打回生词，' +
+              '眼熟长期连对会自动升入「熟词速过池」，可在首页单独快速过或批量设为永不复习。' })
     ]);
 
     const legend = el('ul', { class: 'tally' });
@@ -407,28 +351,9 @@ window.Triage = (function () {
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
-    if (sess.mode === 'verify') {
-      const cur = current();
-      if (!cur) return;
-      // 键盘确认时也让粒子从对应按钮冒出来，和鼠标点击表现一致
-      const btns = host ? host.querySelectorAll('.verify-actions .btn') : null;
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        classifyFx(3, btns && btns[0]);
-        commit(cur, 3);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        classifyFx(2, btns && btns[1]);
-        commit(cur, 2);
-      } else if (e.key === 's' || e.key === 'S') {
-        e.preventDefault(); window.Speak.say(cur.entry.word);
-      }
-      return;
-    }
-
     if (sess.mode !== 'card') return;
 
-    if (e.key === '1' || e.key === '2' || e.key === '3') {
+    if (e.key === '1' || e.key === '2') {
       e.preventDefault();
       const lv = Number(e.key);
       // 键盘定级时也让粒子从对应按钮冒出来，位置和鼠标点击一致

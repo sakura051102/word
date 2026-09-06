@@ -1,11 +1,12 @@
 /* ===========================================================================
- *  review.js —— 每日队列 + 三种练习模式
+ *  review.js —— 主复习：每日队列 + 翻卡/选择题（v2，只跑 L1/L2）
  * ---------------------------------------------------------------------------
- *  队列 = 到期复习词（含往日积压） + 按 L1:L2:L3 配额投放的新词，三类交错。
+ *  队列 = 到期复习词（含往日积压，仅 L1/L2） + 按 L1:L2 配额投放的新词，两类交错。
+ *  L3 熟词不进这里 —— 它们在独立的「熟词速过」模式（rapid.js）里处理。
  *
- *  L3 熟词不进当天的学习队列：普查阶段的强制核对已经验证过一次，
- *  它们直接排到 20 天后巡检。配额对 L3 的意义只是把到期日摊开，
- *  否则 20 天后会集中爆量。
+ *  结束口径（修「学满还一直冒卡」）：以【真实卡】为准。初始队列长度即 realTotal，
+ *  每评分一张非重学卡 realDone+1；realDone 达 realTotal 立即结束，没轮到的
+ *  again 当天重学副本直接丢弃（原卡已正式排到明天，不丢学习）。
  * =========================================================================== */
 
 window.Review = (function () {
@@ -21,20 +22,22 @@ window.Review = (function () {
 
   /* ---------------------------------------------------------------- 配额分配 */
 
-  /* 把 budget 个名额按 quota 比例分给三类，受各类可用量 avail 限制，
-     余量按配额从高到低轮流补足，不浪费名额。 */
+  /* 把 budget 个名额按 quota 比例分给各类（主复习只有 L1/L2 两类），
+     受各类可用量 avail 限制，余量按配额从高到低轮流补足，不浪费名额。 */
   function allocate(budget, quota, avail) {
-    const q  = quota.map(function (x) { return Math.max(0, x || 0); });
+    const n  = avail.length;
+    const q  = avail.map(function (_, i) { return Math.max(0, (quota[i] || 0)); });
     const qs = q.reduce(function (a, b) { return a + b; }, 0) || 1;
-    const out = [0, 0, 0];
+    const out = avail.map(function () { return 0; });
     let remaining = budget;
 
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < n; i++) {
       const want = Math.min(avail[i], Math.floor(budget * q[i] / qs));
       out[i] = want;
       remaining -= want;
     }
-    const order = [0, 1, 2].sort(function (a, b) { return q[b] - q[a]; });
+    const order = Array.from({ length: n }, function (_, i) { return i; })
+                       .sort(function (a, b) { return q[b] - q[a]; });
     let guard = 0;
     while (remaining > 0 && guard++ < budget + 10) {
       let placed = false;
@@ -134,7 +137,7 @@ window.Review = (function () {
     const overdue = [];
     Object.keys(st.cards).forEach(function (w) {
       const c = st.cards[w];
-      if (!c.active || !window.WB.get(w)) return;
+      if (!c.active || c.archived || c.level === 3 || !window.WB.get(w)) return;
       if (!E.isDue(c, today)) return;
       if (c.due === today) dueToday.push(w);
       else overdue.push({ word: w, due: c.due });
@@ -157,25 +160,6 @@ window.Review = (function () {
     };
   }
 
-  /*
-   * L3 熟词一次性排期（buildQueue 里唯一会【改写卡片】的副作用，单独抽出来）。
-   *
-   * 熟词不占每日新词配额、也不进当天学习队列（普查时已强制核对过一次），
-   * 拿配额限它们反而有害：按 6:3:1、每天 30 新词，熟词每天只能排 3 个，
-   * 两千个要 666 天。改为把首次巡检日均摊到自适应窗口（约每天 20 个，
-   * 下限 = L3 初始间隔 20 天、上限 120 天），两三分钟就能巡检完一天的量。
-   * 返回排期词数；调用方据此决定是否落盘。
-   */
-  function scheduleL3(cards, l3Words) {
-    const n = l3Words.length;
-    if (!n) return 0;
-    const win = Math.min(120, Math.max(E.LEVELS[3].initial, Math.ceil(n / 20)));
-    l3Words.forEach(function (w, i) {
-      E.activate(cards[w], 1 + Math.floor(i * win / n));
-    });
-    return n;
-  }
-
   function buildQueue() {
     const st    = S.get();
     const cards = st.cards;
@@ -183,17 +167,19 @@ window.Review = (function () {
     /* 默认「普查全部做完才开始复习」。入口按钮已经按这个规则隐藏，
        这里再挡一道，免得从别的路径绕进来直接开背。 */
     if (!st.settings.reviewBeforeTriageDone && !window.Triage.status().complete) {
-      return { queue: [], dueCount: 0, newCount: 0, l3Scheduled: 0 };
+      return { queue: [], dueCount: 0, newCount: 0 };
     }
 
-    const freshByLevel = [[], [], []];
+    // 主复习只投放 L1/L2 新词；L3 在速过模式、archived 永不复习，都不进队列
+    const freshByLevel = [[], []];
 
     Object.keys(cards).forEach(function (w) {
       const c = cards[w];
       // 词库换过之后可能有卡片对应不上词条 —— 跳过但不删卡片，
       // 万一将来换回去或补全词库，进度还在
       if (!window.WB.get(w)) return;
-      if (!c.active && c.level >= 1 && c.level <= 3) {
+      if (c.archived) return;
+      if (!c.active && (c.level === 1 || c.level === 2)) {
         freshByLevel[c.level - 1].push(w);
       }
     });
@@ -218,15 +204,9 @@ window.Review = (function () {
       a.sort(function (x, y) { return window.WB.indexOf(x) - window.WB.indexOf(y); });
     });
 
-    /* L3 熟词不占新词配额，进复习页时一次性把首次巡检日摊到未来（见 scheduleL3）。
-       skipL3Patrol 开启时一个都不排，熟词彻底不进复习。 */
-    const l3Words = st.settings.skipL3Patrol ? [] : freshByLevel[2];
-    const l3Scheduled = scheduleL3(cards, l3Words);
-    if (l3Scheduled) S.save();
-
-    /* 配额只在 L1/L2 之间分配：L3 可用量传 0，余量自动回流给 L1/L2，不浪费名额 */
+    /* 新词配额只在 L1/L2 之间分配 */
     const alloc = allocate(budget, st.settings.quota,
-                           [freshByLevel[0].length, freshByLevel[1].length, 0]);
+                           [freshByLevel[0].length, freshByLevel[1].length]);
 
     const newItems = [];
     for (let lv = 1; lv <= 2; lv++) {
@@ -238,7 +218,6 @@ window.Review = (function () {
     return { queue: interleave(dueItems.concat(newItems)),
              dueCount: dueItems.length,
              newCount: newItems.length,
-             l3Scheduled: l3Scheduled,
              limit: limit,
              usedToday: used,
              budget: budget,
@@ -280,9 +259,7 @@ window.Review = (function () {
     const ratio = S.get().settings.quizRatio;
     const r = Math.random();
     if (card.level === 1) return r < ratio ? 'quiz-zh2en' : 'flip';
-    if (card.level === 2) return r < ratio ? 'quiz-en2zh' : 'flip';
-    // L3 以翻卡巡检为主，选择题减半
-    return r < ratio * 0.5 ? 'quiz-en2zh' : 'flip';
+    return r < ratio ? 'quiz-en2zh' : 'flip';   // L2 眼熟：看词选义
   }
 
   /* 出选择题。答案与干扰项都只用「常考义」——
@@ -320,10 +297,10 @@ window.Review = (function () {
     return {
       queue: built.queue,
       pos: 0,
-      totalItems: built.queue.length,   // 初始规划量，做进度分母；again 当天重学不把它撑大
+      totalItems: built.queue.length,   // 初始真实卡数，做进度分母；again 重学副本不把它撑大
+      realDone: 0,                      // 已评分的真实卡数（重学副本不计），达 totalItems 即结束
       dueCount: built.dueCount,
       newCount: built.newCount,
-      l3Scheduled: built.l3Scheduled,
       limit: built.limit,
       usedToday: built.usedToday,
       budget: built.budget,
@@ -332,10 +309,9 @@ window.Review = (function () {
       deferredBacklog: built.deferredBacklog,
       backlogDays: built.backlogDays,
       reviewCap: built.reviewCap,
-      stage: 'front',        // front | back | answered | upgrade | finished
+      stage: 'front',        // front | back | answered | finished
       quiz: null,
       mode: null,
-      pendingUpgrade: null,
       startedAt: Date.now(),
       stats: { done: 0, correct: 0, wrong: 0, downgrades: 0, upgrades: 0,
                combo: 0, maxCombo: 0 }
@@ -372,10 +348,16 @@ window.Review = (function () {
     sess.stage = 'front';
   }
 
+  /* 纯判定（供单测）：真实卡评完即结束 —— 哪怕物理队列后面还压着没轮到的
+     again 重学副本也直接结束并丢弃；pos 走到物理尽头是兜底结束。 */
+  function shouldFinish(realDone, realTotal, nextPos, queueLen) {
+    if (realTotal > 0 && realDone >= realTotal) return true;
+    return nextPos >= queueLen;
+  }
+
   function advance() {
     sess.pos++;
-    sess.pendingUpgrade = null;
-    if (sess.pos >= sess.queue.length) {
+    if (shouldFinish(sess.realDone, sess.totalItems, sess.pos, sess.queue.length)) {
       sess.stage = 'finished';
       flushTime();
     } else {
@@ -460,6 +442,7 @@ window.Review = (function () {
       if (g !== 'again') { S.bump('correct', 1); sess.stats.correct++; }
       else sess.stats.wrong++;
       sess.stats.done++;
+      sess.realDone++;   // 只有真实卡推进完成度；重学副本不推进
     }
     /* 连击是临场状态，重学照常参与：再忘就断、捡回来就连上。 */
     if (g !== 'again') {
@@ -472,16 +455,18 @@ window.Review = (function () {
     snapshot();
     comboFx();
 
-    let hasUpgrade = false;
     res.events.forEach(function (ev) {
       if (ev.type === 'downgrade') {
         sess.stats.downgrades++;
         window.UI.toast(
           it.word + '：' + E.LEVELS[ev.from].name + ' → ' + E.LEVELS[ev.to].name +
           '（' + ev.reason + '）', 'warn', 4200);
-      } else if (ev.type === 'upgrade-prompt') {
-        hasUpgrade = true;
-        sess.pendingUpgrade = { word: it.word, card: it.card, from: ev.from, to: ev.to };
+      } else if (ev.type === 'upgrade') {
+        // 自动升级已在引擎内生效，这里只给一条轻提示，不打断流程
+        sess.stats.upgrades++;
+        window.UI.toast(
+          it.word + '：' + E.LEVELS[ev.from].name + ' → ' + E.LEVELS[ev.to].name +
+          (ev.to === 3 ? '（已移入熟词速过池）' : ''), 'good', 3200);
       }
     });
 
@@ -497,8 +482,7 @@ window.Review = (function () {
       }));
     }
 
-    if (hasUpgrade) { sess.stage = 'upgrade'; render(); }
-    else advance();
+    advance();
   }
 
   /* ---------------------------------------------------------------- 渲染 */
@@ -534,13 +518,6 @@ window.Review = (function () {
     const stage = el('div', { class: 'review-stage' });
     host.appendChild(stage);
 
-    if (sess.stage === 'upgrade') {
-      const v = viewUpgrade();
-      stage.appendChild(v);
-      if (window.FX) window.FX.enter(v, { dy: 0, scale: .92, duration: 340 });
-      return;
-    }
-
     const it = currentItem();
     if (!it) { sess.stage = 'finished'; render(); return; }
 
@@ -554,10 +531,11 @@ window.Review = (function () {
   }
 
   function topBar() {
-    // 分母固定为初始规划量：again 当天重学会让 queue 临时变长，但进度条不因此倒退
+    // 分母=初始真实卡数，分子=已评真实卡：重学副本既不撑大分母也不推进分子，
+    // 因此进度严格 1→total，最后一张真实卡评完立即结束，不会出现「47/47 还冒卡」。
     const total = sess.totalItems || sess.queue.length;
-    const shown = Math.min(sess.pos + 1, total);
-    const pct = total ? (Math.min(sess.pos, total) / total * 100) : 0;
+    const shown = Math.min(sess.realDone + 1, total);
+    const pct = total ? (sess.realDone / total * 100) : 0;
     const it = currentItem();
     return el('div', { class: 'review-top' }, [
       el('div', { class: 'progress' }, [
@@ -598,9 +576,15 @@ window.Review = (function () {
     } else {
       box.appendChild(window.DefsView.render(it.entry, { citeLimit: 2 }));
       box.appendChild(gradeButtons(it));
+      box.appendChild(notebookBar(it));
       box.appendChild(levelSwitch(it));
     }
     return box;
+  }
+
+  /* 「加入单词本」工具条（单词本模块未加载时不显示，保证可降级） */
+  function notebookBar(it) {
+    return window.NotebookUI ? window.NotebookUI.bar(it.entry) : null;
   }
 
   /*
@@ -657,7 +641,8 @@ window.Review = (function () {
     const wrap = el('div', { class: 'lv-switch' }, [
       el('span', { class: 'lv-switch-label', text: '这个词归类为' })
     ]);
-    [1, 2, 3].forEach(function (lv) {
+    // 主复习只在 L1/L2 间手动调；L3 只能由系统自动升入或在词书页/速过模式管理
+    [1, 2].forEach(function (lv) {
       const active = it.card.level === lv;
       wrap.appendChild(el('button', {
         class: 'lv-pill lv-pill--' + lv + (active ? ' is-active' : ''),
@@ -719,6 +704,7 @@ window.Review = (function () {
           onclick: continueAfterQuiz
         }, [el('span', { text: '继续' }), el('kbd', { text: 'Space' })])
       ]));
+      box.appendChild(notebookBar(it));
       box.appendChild(levelSwitch(it));
     } else {
       box.appendChild(el('p', { class: 'keyhint', text: '按 1–4 选择' }));
@@ -764,47 +750,6 @@ window.Review = (function () {
     const q = sess.quiz;
     const right = q.options[q.chosen] && q.options[q.chosen].correct;
     doGrade(right ? 'good' : 'again', null, true);
-  }
-
-  /* --- 升级确认 --- */
-  function viewUpgrade() {
-    const p = sess.pendingUpgrade;
-    return el('div', { class: 'card card--upgrade' }, [
-      el('h3', { text: '要给它升一级吗？' }),
-      el('p', { class: 'upgrade-word', text: p.word }),
-      el('p', { class: 'muted', text:
-        '连续答对 ' + p.card.streak + ' 次，下次复习已排到 ' + p.card.interval +
-        ' 天后。升为「' + E.LEVELS[p.to].name + '」后出现频率会明显降低。' }),
-      el('div', { class: 'card-actions' }, [
-        el('button', {
-          class: 'btn btn--primary', type: 'button',
-          text: '升为' + E.LEVELS[p.to].name,
-          onclick: function (ev) {
-            E.applyUpgrade(p.card, p.to);
-            sess.stats.upgrades++;
-            S.save(); snapshot();
-            /* 升级是整个复习流程里最值得庆祝的一步 —— 从生词爬到熟词，
-               给它最大的一发。同样要抢在 advance() 重绘之前取坐标。 */
-            if (window.FX && !window.FX.off) {
-              window.FX.burst(ev.currentTarget, { kind: 'gold', count: 34, power: 150 });
-              window.FX.ring(ev.currentTarget, 'gold');
-              window.FX.flash('gold');
-              window.FX.popText(ev.currentTarget, 'LEVEL UP', 'gold');
-            }
-            window.UI.toast(p.word + ' 已升为「' + E.LEVELS[p.to].name + '」', 'good', 2600);
-            advance();
-          }
-        }),
-        el('button', {
-          class: 'btn', type: 'button', text: '暂不，再练练',
-          onclick: function () {
-            S.snoozeUpgrade(p.word, 14);
-            advance();
-          }
-        })
-      ]),
-      el('p', { class: 'keyhint', text: '选「暂不」后 14 天内不再问这个词' })
-    ]);
   }
 
   /* 说清「为什么现在没词了」—— 是普查没做完、配额用完，还是真的都不到期。
@@ -903,11 +848,6 @@ window.Review = (function () {
           '有 ' + s.downgrades + ' 个词被降级 —— 这些正是你以为记住了、其实没记住的词，值得多看两眼。' }));
       }
     }
-    if (sess.l3Scheduled) {
-      box.appendChild(el('p', { class: 'muted', text:
-        '另有 ' + fmtNum(sess.l3Scheduled) + ' 个熟词已排期，会在未来一段时间里陆续来做巡检，不占今天的量。' }));
-    }
-
     /* 队列为什么是这个长度、接下来还能不能背 —— 直接写清楚 */
     const ex = statusExplain();
     if (ex.kind !== 'triage') {
@@ -947,7 +887,7 @@ window.Review = (function () {
       if (it) { e.preventDefault(); window.Speak.say(it.entry.word); }
       return;
     }
-    if (sess.stage === 'finished' || sess.stage === 'upgrade') return;
+    if (sess.stage === 'finished') return;
 
     if (sess.mode === 'flip') {
       if (sess.stage === 'front') {
@@ -998,12 +938,14 @@ window.Review = (function () {
   function status() {
     const st    = S.get();
     const cards = st.cards;
-    const freshAvail = [0, 0, 0];
+    // 主复习只有 L1/L2 两类新词；L3 在速过模式、archived 永不复习，都不计入
+    const freshAvail = [0, 0];
 
     Object.keys(cards).forEach(function (w) {
       const c = cards[w];
       if (!window.WB.get(w)) return;
-      if (!c.active && c.level >= 1 && c.level <= 3) freshAvail[c.level - 1]++;
+      if (c.archived) return;
+      if (!c.active && (c.level === 1 || c.level === 2)) freshAvail[c.level - 1]++;
     });
 
     /* 到期复习数与 buildQueue 走同一个规划函数：今天新到期全算、往日积压按上限算，
@@ -1013,17 +955,14 @@ window.Review = (function () {
     const limit  = effectiveLimit(st, freshAvail[0] + freshAvail[1]);
     const used   = S.getDaily().new || 0;
     const budget = Math.max(0, limit - used);
-    /* 配额只分给 L1/L2 —— L3 不占新词额度，进复习页时会一次性排期 */
-    const alloc  = allocate(budget, st.settings.quota, [freshAvail[0], freshAvail[1], 0]);
+    const alloc  = allocate(budget, st.settings.quota, [freshAvail[0], freshAvail[1]]);
 
     return {
       due: due,
       newL1: alloc[0], newL2: alloc[1],
-      /* 跳过巡检时熟词不再排期，别在首页显示「还有 N 个熟词待排期」误导人 */
-      newL3: st.settings.skipL3Patrol ? 0 : freshAvail[2],
       newToStudy: alloc[0] + alloc[1],
       totalToday: due + alloc[0] + alloc[1],
-      unlearned: freshAvail[0] + freshAvail[1] + freshAvail[2],
+      unlearned: freshAvail[0] + freshAvail[1],
       unlearnedL12: freshAvail[0] + freshAvail[1],
       limit: limit, usedToday: used, budget: budget,
       backlog: plan.backlog, deferredBacklog: plan.deferredBacklog,
@@ -1033,6 +972,7 @@ window.Review = (function () {
 
   return {
     mount: mount, unmount: unmount, status: status, allocate: allocate,
+    shouldFinish: shouldFinish,
     effectiveReviewCap: effectiveReviewCap, effectiveLimit: effectiveLimit
   };
 })();
