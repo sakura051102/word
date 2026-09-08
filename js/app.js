@@ -578,7 +578,7 @@
     if (open) {
       const detail = el('div', { class: 'word-detail' });
       // 词书页是「查」而不是「背」，不赶时间，真题原句全给
-      detail.appendChild(window.DefsView.render(entry, { citeLimit: 3 }));
+      detail.appendChild(window.DefsView.render(entry, { compact: false, citeLimit: 3 }));
 
       const tools = el('div', { class: 'row-tools' });
       const lvBox = el('div', { class: 'lv-switch' }, [
@@ -821,9 +821,18 @@
     }, '默认关闭 —— 按你的设定，全部分类完再开始复习。' +
        '整本词表普查要几个小时，中途想先复习已分类的部分就打开它。'));
 
-    g2.appendChild(checkField('翻面时自动朗读', s.autoSpeak, function (v) {
+    g2.appendChild(checkField('出现单词时自动朗读', s.autoSpeak, function (v) {
       s.autoSpeak = v; S.save();
     }, window.Speak.available() ? null : '当前浏览器不支持语音合成，这个开关不会生效。'));
+
+    g2.appendChild(field('发音口音', select('发音口音', s.accent || 'us', [
+      { v: 'us', t: '美音（en-US）' },
+      { v: 'gb', t: '英音（en-GB）' }
+    ], function (v) {
+      s.accent = v; S.save();
+      window.Speak.setAccent(v);
+      window.Speak.say('pronunciation');
+    }), window.Speak.available() ? null : '当前浏览器不支持语音合成。'));
     box.appendChild(g2);
 
     /* --- 外观 --- */
@@ -1147,6 +1156,7 @@
     window.WB.init();
     S.load();
     window.Speak.init();
+    window.Speak.setAccent(S.get().settings.accent || 'us');
     applyTheme();
     /* 特效层。init 内部会在 reduced-motion 或 WAAPI 不可用时自行空转，
        所以这里无条件调用即可，不需要判断。 */

@@ -5,10 +5,10 @@
  *
  *  缓存策略分两类，因为这个项目里资源的性质差得很远：
  *
- *  【代码类】(html / js/*.js / manifest / icons) —— stale-while-revalidate
- *      先给缓存里的旧版本（秒开），同时后台悄悄拉新版存回去，
- *      下次打开就是新的。改了代码不用记得改版本号，这一点很重要 ——
- *      靠人手动 bump 版本的方案，迟早会忘。
+ *  【代码类】(html / js/*.js / manifest / icons) —— network-first
+ *      在线时永远先问网络、直接给最新版；只有断网才退回缓存。
+ *      这样每次 push 完代码，设备下次打开就是新的，不用等、不用改版本号。
+ *      代价是失去「秒开」——但本项目代码总共几百 KB，在线重验的开销很小。
  *
  *  【词库】(data/*.js，2.2MB) —— 纯缓存优先，不做后台重验
  *      它是这里唯一的大文件，而且只有重新跑 build-wordbook.js 才会变。
@@ -16,10 +16,10 @@
  *      词库真的换了，就把下面的 VERSION 加一，让整个缓存重建。
  *
  *  ⚠ 换了 data/wordbook.js 之后，记得把 VERSION 改掉，否则用户拿到的
- *    还是旧词库。改代码则不需要，SWR 会自动更新。
+ *    还是旧词库。改代码则不需要，network-first 会自动拉到最新。
  * =========================================================================== */
 
-const VERSION = 'v3';
+const VERSION = 'v4';
 const CACHE   = 'kaoyan-vocab-' + VERSION;
 
 /* 首次安装时预缓存的清单。
@@ -39,8 +39,10 @@ const ASSETS = [
   'js/fx.js',
   'js/ui.js',
   'js/charts.js',
+  'js/notebook.js',
   'js/triage.js',
   'js/review.js',
+  'js/rapid.js',
   'js/app.js',
   'icons/icon.svg',
   'icons/icon-192.png',
@@ -88,6 +90,14 @@ self.addEventListener('activate', function (e) {
       return null;
     }));
     await self.clients.claim();
+
+    // 新 SW 激活并接管后，通知所有已打开的页面：代码已更新，可刷新到最新版。
+    // 不发这条的话，已经开着的标签要等下次手动重开才会用上新缓存 ——
+    // 正是「push 完第一次打开还是旧的，过一会儿才新」的来源之一。
+    const wins = await self.clients.matchAll({ type: 'window' });
+    wins.forEach(function (c) {
+      try { c.postMessage({ type: 'SW_UPDATED', version: VERSION }); } catch (e) {}
+    });
   })());
 });
 
@@ -108,35 +118,37 @@ self.addEventListener('fetch', function (e) {
     /* 词库：命中就直接给，不做后台重验 */
     if (cached && isBulkData(url)) return cached;
 
-    /* 其余资源：stale-while-revalidate */
-    const network = fetch(req).then(function (res) {
+    /*
+     * 代码类：network-first。
+     * cache: 'no-cache' 让这次 fetch 跳过浏览器自己的 HTTP 缓存，强制去
+     * 服务器做一次条件重验（改了返回 200 新文件，没改返回 304 省流量）。
+     * 不用 no-cache 的话，GitHub Pages 给 html 发的 max-age=600 会让浏览器
+     * 在 10 分钟内继续拿旧页面——正是「提交后平板迟迟不更新」的元凶之一。
+     */
+    try {
+      const fresh = await fetch(req, { cache: 'no-cache' });
       // 只缓存正常的同源响应；opaque / 4xx / 5xx 不要进缓存，
       // 否则会把一个 404 页面固化下来，之后怎么刷新都是错的
-      if (res && res.ok && res.type === 'basic') {
-        cache.put(req, res.clone()).catch(function () {});
+      if (fresh && fresh.ok && fresh.type === 'basic') {
+        cache.put(req, fresh.clone()).catch(function () {});
       }
-      return res;
-    }).catch(function () { return null; });
+      return fresh;
+    } catch (err) {
+      /* 断网：退回缓存 */
+      if (cached) return cached;
 
-    if (cached) {
-      e.waitUntil(network);      // 后台更新，不阻塞这次响应
-      return cached;
+      /*
+       * 彻底断网且没缓存。如果是页面跳转，退回缓存里的主页面，
+       * 至少让用户看到应用而不是浏览器的恐龙页。
+       */
+      if (req.mode === 'navigate') {
+        const fallback = await cache.match('背单词.html') || await cache.match('index.html');
+        if (fallback) return fallback;
+      }
+      return new Response('离线，且该资源未缓存。', {
+        status: 504,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+      });
     }
-
-    const res = await network;
-    if (res) return res;
-
-    /*
-     * 彻底断网且没缓存。如果是页面跳转，退回缓存里的主页面，
-     * 至少让用户看到应用而不是浏览器的恐龙页。
-     */
-    if (req.mode === 'navigate') {
-      const fallback = await cache.match('背单词.html') || await cache.match('index.html');
-      if (fallback) return fallback;
-    }
-    return new Response('离线，且该资源未缓存。', {
-      status: 504,
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-    });
   })());
 });

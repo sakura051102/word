@@ -101,58 +101,136 @@ window.Speak = (function () {
 
   const synth = window.speechSynthesis;
   let voice = null;
-  let ready = false;
+  let accent = 'us';        // us | gb，可由设置页 setAccent 切换
+  let queue = [];           // 待朗读文本块（长句已切分）
+  let kickTimer = null;     // cancel 后延迟启动，绕开 iOS「cancel 后立即 speak 被吞」
+  let guardTimer = null;    // 某些平台不触发 onend 时的兜底推进
+  let curRate = 0.92;
 
+  function normLang(v) { return (v.lang || '').replace('_', '-').toLowerCase(); }
+
+  /* 选一个最可能真能出声的英文语音。
+     不再迷信 localService：iPad/安卓上「本地语音包没下载」时，
+     一个 localService 语音反而是哑的；这里按 口音→默认→自然音色 打分。 */
   function pick() {
     if (!synth) return null;
     const vs = synth.getVoices() || [];
     if (!vs.length) return null;
-    // 优先 en-US，其次 en-GB，再次任意 en-*
-    const byLang = function (prefix) {
-      return vs.filter(function (v) {
-        return (v.lang || '').replace('_', '-').toLowerCase().indexOf(prefix) === 0;
-      });
-    };
-    const pools = [byLang('en-us'), byLang('en-gb'), byLang('en')];
-    for (let i = 0; i < pools.length; i++) {
-      if (pools[i].length) {
-        // 同语言下优先本地合成（延迟低、离线可用）
-        const local = pools[i].filter(function (v) { return v.localService; });
-        return (local.length ? local : pools[i])[0];
-      }
+    const want = accent === 'gb' ? 'en-gb' : 'en-us';
+    let pool = vs.filter(function (v) { return normLang(v).indexOf(want) === 0; });
+    if (!pool.length) pool = vs.filter(function (v) { return normLang(v).indexOf('en') === 0; });
+    // 没有任何英文语音时返回 null —— 绝不能退化绑定一个中文语音去念英文，
+    // 那会变成中文腔乱读或直接静默；此时只给 utterance 设 lang=en-US 交给系统。
+    if (!pool.length) return null;
+    function score(v) {
+      let s = 0;
+      if (v.default) s += 4;
+      if (/google|natural|samantha|alex|daniel|serena|online/i.test(v.name || '')) s += 2;
+      // 本地语音只加很弱的分：能用但不优先于质量更好的默认/在线音
+      if (v.localService) s += 1;
+      return s;
     }
-    return null;
+    return pool.slice().sort(function (a, b) { return score(b) - score(a); })[0] || null;
   }
+
+  function refresh() { voice = pick(); }
 
   function init() {
     if (!synth) return;
-    voice = pick();
-    ready = !!voice;
-    // Chrome 的 voice 列表是异步加载的，首次同步调用通常拿到空数组
+    refresh();
+    // Chrome/Edge 的 voice 列表异步加载，首次同步调用常为空，监听变化后重选
     if (typeof synth.addEventListener === 'function') {
-      synth.addEventListener('voiceschanged', function () {
-        voice = pick();
-        ready = !!voice;
-      });
+      synth.addEventListener('voiceschanged', refresh);
     } else {
-      synth.onvoiceschanged = function () { voice = pick(); ready = !!voice; };
+      synth.onvoiceschanged = refresh;
     }
+    // iOS 必须在一次用户手势里「解锁」过语音引擎，之后自动朗读才会出声。
+    // 首个点击/触摸时播一条几乎为空的 utterance 完成解锁，随后立即移除监听。
+    let unlocked = false;
+    function unlock() {
+      if (unlocked) return;
+      unlocked = true;
+      try {
+        const u = new SpeechSynthesisUtterance(' ');
+        u.volume = 0;
+        synth.speak(u);
+      } catch (e) {}
+    }
+    ['pointerdown', 'touchend', 'click'].forEach(function (ev) {
+      document.addEventListener(ev, unlock, { once: true, passive: true });
+    });
   }
 
+  function setAccent(a) { accent = (a === 'gb' ? 'gb' : 'us'); refresh(); }
+
   function available() { return !!synth; }
+  function hasVoice() { return !!voice; }
+
+  /* 长句切短：单词/短语整块读；超过 14 词的句子按标点切成小块队列，
+     规避 iOS SpeechSynthesis 读长句中途静默/截断的问题。 */
+  function splitText(text) {
+    const s = String(text).trim();
+    if (s.split(/\s+/).length <= 14) return [s];
+    const parts = s.match(/[^.!?;。；！？]+[.!?;。；！？]?/g) || [s];
+    const out = [];
+    let buf = '';
+    parts.forEach(function (p) {
+      p = p.trim();
+      if (!p) return;
+      if ((buf + ' ' + p).trim().split(/\s+/).length > 14) {
+        if (buf) out.push(buf.trim());
+        buf = p;
+      } else {
+        buf = buf ? buf + ' ' + p : p;
+      }
+    });
+    if (buf) out.push(buf.trim());
+    return out;
+  }
+
+  function clearGuard() { if (guardTimer) { clearTimeout(guardTimer); guardTimer = null; } }
+
+  function playNext() {
+    if (!synth) return;
+    if (!queue.length) { clearGuard(); return; }
+    const text = queue.shift();
+    let done = false;
+    function advance() {
+      if (done) return;
+      done = true;
+      clearGuard();
+      setTimeout(playNext, 60);     // 块间小间隔，听感是连贯的一句话
+    }
+    let u;
+    try {
+      u = new SpeechSynthesisUtterance(text);
+    } catch (e) { advance(); return; }
+    if (!voice) refresh();
+    if (voice) { u.voice = voice; u.lang = voice.lang; }
+    else u.lang = accent === 'gb' ? 'en-GB' : 'en-US';
+    u.rate = curRate; u.pitch = 1; u.volume = 1;
+    u.onend = advance;
+    u.onerror = advance;
+    try {
+      if (typeof synth.resume === 'function') synth.resume();
+      synth.speak(u);
+    } catch (e) { advance(); return; }
+    // 兜底：个别平台长句既不 onend 也不 onerror，按预估时长强推下一块
+    clearGuard();
+    guardTimer = setTimeout(advance, Math.max(2500, text.length * 95) + 1500);
+  }
 
   function say(text, opts) {
     if (!synth || !text) return false;
+    curRate = (opts && opts.rate) || 0.92;
     try {
-      synth.cancel();                       // 打断上一条，避免排队积压
-      const u = new SpeechSynthesisUtterance(String(text));
-      if (!voice) voice = pick();
-      if (voice) { u.voice = voice; u.lang = voice.lang; }
-      else u.lang = 'en-US';
-      u.rate   = (opts && opts.rate)   || 0.92;
-      u.pitch  = (opts && opts.pitch)  || 1;
-      u.volume = (opts && opts.volume) || 1;
-      synth.speak(u);
+      if (kickTimer) { clearTimeout(kickTimer); kickTimer = null; }
+      clearGuard();
+      synth.cancel();                       // 清掉上一条
+      queue = splitText(text);
+      // 关键：cancel() 在 iOS 上是异步的，紧接着 speak() 会被一起吞掉，
+      // 延迟一帧再启动队列即可稳定出声。
+      kickTimer = setTimeout(playNext, 80);
       return true;
     } catch (e) {
       console.warn('[speak] 朗读失败', e);
@@ -160,10 +238,17 @@ window.Speak = (function () {
     }
   }
 
-  function stop() { if (synth) try { synth.cancel(); } catch (e) {} }
+  function stop() {
+    if (!synth) return;
+    queue = [];
+    if (kickTimer) { clearTimeout(kickTimer); kickTimer = null; }
+    clearGuard();
+    try { synth.cancel(); } catch (e) {}
+  }
 
   return { init: init, say: say, stop: stop, available: available,
-           get voice() { return voice; }, get ready() { return ready; } };
+           hasVoice: hasVoice, setAccent: setAccent,
+           get voice() { return voice; } };
 })();
 
 /* ------------------------------------------------- 义项分级展示组件 */
@@ -174,88 +259,46 @@ window.DefsView = (function () {
   const el = window.UI.el;
 
   /**
-   * 渲染一个词条的释义区。
+   * 渲染一个词条的释义区（背面信息分层，渐进披露）。
+   *
+   * 顺序：① 中文释义 → ② 一条最短双语主例句（记忆主力）→ ③ 常用搭配
+   *       → 折叠区（更多例句 / 真题长难句 / 相关词）→ 查词典外链。
    *
    * opts:
+   *   compact     —— 复习/速过/选择题卡用 true：只露 1 条主例句、搭配限 3 条、
+   *                  其余全部折叠，保证一屏看完；词书页详情用 false（默认，尽量展开）
    *   showPhrases —— 是否显示短语搭配，默认 true
    *   showExtras  —— 是否显示相关词，默认 true
-   *   showExamples—— 是否显示例句（词库自带的），默认 true
-   *   showCites   —— 是否显示真题原句，默认 true
+   *   showCites   —— 是否显示真题原句，默认 true（始终折叠）
    *   citeLimit   —— 最多显示几条真题原句，默认 2
-   *                  （复习卡片上要克制；词书页展开时可以放开）
    */
   function render(entry, opts) {
     opts = opts || {};
+    const compact = !!opts.compact;
     const showPhrases = opts.showPhrases !== false;
     const showExtras  = opts.showExtras  !== false;
 
     const root  = el('div', { class: 'defs-view' });
 
-    /* --- 义项 --- */
+    /* ① 义项（中文释义） */
     const list = el('ul', { class: 'def-list' });
     window.WB.studyDefs(entry).forEach(function (d) { list.appendChild(defRow(d)); });
     root.appendChild(list);
 
-    /* --- 真题原句：放在词库自带例句【之前】 ---
-       这是唯一一处真实考过的语料，优先级高于教材式的通用例句。 */
-    if (opts.showCites !== false) {
-      const cites = window.WB.citationsOf(entry.word,
-                      opts.citeLimit === undefined ? 2 : opts.citeLimit);
-      if (cites.length) {
-        const box = el('div', { class: 'cites' }, [
-          el('div', { class: 'sub-head', text: '真题原句' })
-        ]);
-        const ul = el('ul', { class: 'cite-list' });
-        cites.forEach(function (c) {
-          const li = el('li', { class: 'cite-item' });
-          const row = el('p', { class: 'cite-sent' }, [el('span', { text: c.sent })]);
-          if (window.Speak.available()) {
-            row.appendChild(el('button', {
-              class: 'speak-btn speak-btn--sm', type: 'button',
-              title: '朗读', 'aria-label': '朗读真题原句',
-              onclick: function (e) { e.stopPropagation(); window.Speak.say(c.sent); }
-            }, [el('span', { text: '🔊', 'aria-hidden': 'true' })]));
-          }
-          li.appendChild(row);
-          if (c.src) li.appendChild(el('span', { class: 'cite-src', text: c.src }));
-          ul.appendChild(li);
-        });
-        box.appendChild(ul);
-        root.appendChild(box);
-      }
-    }
+    /* ② 主例句：挑最短的一条双语例句 —— 短、自然、带中文，最利于记忆提取 */
+    const all = (entry.examples || []).filter(function (x) { return x && x.en; });
+    const main = pickMainExample(all);
+    const rest = all.filter(function (x) { return x !== main; });
+    if (main) root.appendChild(mainExample(main));
 
-    /* --- 例句：词条级 entry.examples --- */
-    if (opts.showExamples !== false && entry.examples && entry.examples.length) {
-      const box = el('div', { class: 'examples' }, [
-        el('div', { class: 'sub-head', text: '例句' })
-      ]);
-      const ul = el('ul', { class: 'example-list' });
-      entry.examples.forEach(function (ex) {
-        if (!ex || !ex.en) return;
-        const li = el('li', { class: 'example' });
-        const enRow = el('p', { class: 'ex-en' }, [el('span', { text: ex.en })]);
-        if (window.Speak.available()) {
-          enRow.appendChild(el('button', {
-            class: 'speak-btn speak-btn--sm', type: 'button',
-            title: '朗读例句', 'aria-label': '朗读例句',
-            onclick: function (e) { e.stopPropagation(); window.Speak.say(ex.en); }
-          }, [el('span', { text: '🔊', 'aria-hidden': 'true' })]));
-        }
-        li.appendChild(enRow);
-        if (ex.zh) li.appendChild(el('p', { class: 'ex-zh', text: ex.zh }));
-        ul.appendChild(li);
-      });
-      if (ul.childNodes.length) { box.appendChild(ul); root.appendChild(box); }
-    }
-
-    /* --- 短语搭配：作为词条附属，不单独成卡、不占复习配额 --- */
+    /* ③ 短语搭配：复习卡只留前 3 条，避免一屏过载 */
     if (showPhrases && entry.phrases && entry.phrases.length) {
+      const phrases = compact ? entry.phrases.slice(0, 3) : entry.phrases;
       const box = el('div', { class: 'phrases' }, [
         el('div', { class: 'sub-head', text: '常用搭配' })
       ]);
       const ul = el('ul', { class: 'phrase-list' });
-      entry.phrases.forEach(function (p) {
+      phrases.forEach(function (p) {
         ul.appendChild(el('li', { class: 'phrase' }, [
           el('code', { class: 'phrase-en', text: p.text }),
           el('span', { class: 'phrase-zh', text: p.zh || '' })
@@ -265,15 +308,129 @@ window.DefsView = (function () {
       root.appendChild(box);
     }
 
-    /* --- 相关词（同根词）--- */
-    if (showExtras && entry.related && entry.related.length) {
-      root.appendChild(el('div', { class: 'related' }, [
-        el('span', { class: 'sub-head sub-head--inline', text: '相关' }),
-        el('span', { text: entry.related.join('　') })
-      ]));
+    /* ④-a 更多双语例句：复习卡折叠，词书页平铺 */
+    if (rest.length) {
+      const ul = el('ul', { class: 'example-list' });
+      rest.forEach(function (ex) { ul.appendChild(exampleRow(ex)); });
+      if (compact) {
+        root.appendChild(fold('更多例句 · ' + rest.length, [ul], 'dv-fold'));
+      } else {
+        root.appendChild(el('div', { class: 'examples' }, [
+          el('div', { class: 'sub-head', text: '例句' }), ul
+        ]));
+      }
     }
 
+    /* ④-b 真题原句：永远折叠。它是长难句、无译文，属精读材料而非记忆材料，
+       不再顶到最前面抢注意力。 */
+    if (opts.showCites !== false) {
+      const cites = window.WB.citationsOf(entry.word,
+                      opts.citeLimit === undefined ? 2 : opts.citeLimit);
+      if (cites.length) {
+        const ul = el('ul', { class: 'cite-list' });
+        cites.forEach(function (c) { ul.appendChild(citeItem(c)); });
+        root.appendChild(fold('真题原句 ' + cites.length + ' 条 · 长难句 · 无译文 · 选学',
+                              [ul], 'dv-fold dv-fold--cite'));
+      }
+    }
+
+    /* ④-c 相关词（同根词）：复习卡折叠，词书页平铺 */
+    if (showExtras && entry.related && entry.related.length) {
+      if (compact) {
+        root.appendChild(fold('相关词', [
+          el('div', { class: 'related-text', text: entry.related.join('　') })
+        ], 'dv-fold'));
+      } else {
+        root.appendChild(el('div', { class: 'related' }, [
+          el('span', { class: 'sub-head sub-head--inline', text: '相关' }),
+          el('span', { text: entry.related.join('　') })
+        ]));
+      }
+    }
+
+    /* ⑤ 查词典外链：复习卡只在缺少双语例句时出现以补中文/真人音，词书页常驻 */
+    if (!main || !compact) root.appendChild(dictLinks(entry.word));
+
     return root;
+  }
+
+  /* 从候选例句里挑「主例句」：优先带中文的，再取英文最短的一条 */
+  function pickMainExample(exs) {
+    if (!exs || !exs.length) return null;
+    const withZh = exs.filter(function (x) { return x.zh; });
+    const pool = withZh.length ? withZh : exs;
+    return pool.slice().sort(function (a, b) {
+      return (a.en || '').length - (b.en || '').length;
+    })[0];
+  }
+
+  function speakBtnOf(text, label, cls) {
+    if (!window.Speak.available()) return null;
+    return el('button', {
+      class: 'speak-btn ' + (cls || 'speak-btn--sm'), type: 'button',
+      title: '朗读', 'aria-label': label,
+      onclick: function (e) { e.stopPropagation(); window.Speak.say(text); }
+    }, [el('span', { text: '🔊', 'aria-hidden': 'true' })]);
+  }
+
+  /* 主例句：突出展示的一条短双语例句 */
+  function mainExample(ex) {
+    const enRow = el('p', { class: 'ex-en main-ex-en' }, [el('span', { text: ex.en })]);
+    const b = speakBtnOf(ex.en, '朗读例句', 'speak-btn--sm');
+    if (b) enRow.appendChild(b);
+    const kids = [enRow];
+    if (ex.zh) kids.push(el('p', { class: 'ex-zh main-ex-zh', text: ex.zh }));
+    return el('div', { class: 'main-example' }, kids);
+  }
+
+  function exampleRow(ex) {
+    const li = el('li', { class: 'example' });
+    const enRow = el('p', { class: 'ex-en' }, [el('span', { text: ex.en })]);
+    const b = speakBtnOf(ex.en, '朗读例句', 'speak-btn--sm');
+    if (b) enRow.appendChild(b);
+    li.appendChild(enRow);
+    if (ex.zh) li.appendChild(el('p', { class: 'ex-zh', text: ex.zh }));
+    return li;
+  }
+
+  function citeItem(c) {
+    const li = el('li', { class: 'cite-item' });
+    const row = el('p', { class: 'cite-sent' }, [el('span', { text: c.sent })]);
+    const b = speakBtnOf(c.sent, '朗读真题原句', 'speak-btn--sm');
+    if (b) row.appendChild(b);
+    li.appendChild(row);
+    if (c.src) li.appendChild(el('span', { class: 'cite-src', text: c.src }));
+    return li;
+  }
+
+  /* 原生 <details> 折叠区：零依赖、零状态、离线可用 */
+  function fold(summaryText, children, cls) {
+    const d = el('details', { class: cls || 'dv-fold' });
+    d.appendChild(el('summary', { class: 'dv-fold-sum', text: summaryText }));
+    const body = el('div', { class: 'dv-fold-body' });
+    children.forEach(function (c) { if (c) body.appendChild(c); });
+    d.appendChild(body);
+    return d;
+  }
+
+  /* 外部在线词典（新窗口打开）。离线时点击无效，不影响其余功能。 */
+  function dictLinks(word) {
+    const w = encodeURIComponent(word);
+    const sources = [
+      ['剑桥', 'https://dictionary.cambridge.org/dictionary/english-chinese-simplified/' + w],
+      ['有道', 'https://www.youdao.com/result?word=' + w + '&lang=en'],
+      ['欧路', 'https://dict.eudic.net/dicts/en/' + w]
+    ];
+    const row = el('div', { class: 'dict-links' }, [
+      el('span', { class: 'dict-hint', text: '查词典' })
+    ]);
+    sources.forEach(function (s) {
+      row.appendChild(el('a', {
+        class: 'dict-link', href: s[1], target: '_blank',
+        rel: 'noopener noreferrer', text: s[0]
+      }));
+    });
+    return row;
   }
 
   /* 单条义项 */

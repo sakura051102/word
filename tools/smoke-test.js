@@ -550,6 +550,51 @@ if (cm) {
   check('  citeLimit 生效', win.WB.citationsOf('account', 1).length === 1);
 }
 
+/* --- 复习卡背面分层：短双语主例句 / 真题折叠 / 查词典外链（复习体验优化） --- */
+section('复习卡背面信息分层（主例句 / 折叠 / 查词典）');
+(function () {
+  const accEntry = win.WB.at(win.WB.indexOf('account'));
+  const compact = win.DefsView.render(accEntry, { compact: true, citeLimit: 2 });
+  const full    = win.DefsView.render(accEntry, { compact: false, citeLimit: 3 });
+
+  const mains = queryAll(compact, '.main-example');
+  check('  compact 复习卡有且仅有一条主例句', mains.length === 1, '实际 ' + mains.length);
+  const zh = compact.querySelector('.main-example .main-ex-zh');
+  check('  主例句带中文翻译', !!zh && zh.textContent.length > 0);
+
+  // 主例句必须是「带中文的例句里最短的一条」
+  const zhs = accEntry.examples.filter(function (x) { return x.zh; }).map(function (x) { return x.en; });
+  const shortest = zhs.slice().sort(function (a, b) { return a.length - b.length; })[0];
+  const en = compact.querySelector('.main-example .main-ex-en').textContent;
+  check('  主例句取最短双语例句', en.indexOf(shortest) === 0, en);
+
+  // 真题长难句折叠进 <details> 且默认不展开，但内容/出处保留
+  const citeFold = compact.querySelector('.dv-fold--cite');
+  check('  真题长难句被折叠（不再顶到最前）', !!citeFold);
+  check('  折叠区默认收起', !!citeFold && !citeFold.attrs.open);
+  check('  折叠后真题出处仍在', !citeFold || /\d{4}/.test(citeFold.textContent));
+
+  // account 有主例句 → compact 不弹查词典；词书页常驻
+  check('  有双语例句时 compact 不显示查词典', queryAll(compact, '.dict-links').length === 0);
+  check('  词书页更多例句平铺(.examples)', queryAll(full, '.examples').length === 1);
+  check('  词书页真题同样折叠', !!full.querySelector('.dv-fold--cite'));
+  check('  词书页常驻查词典入口', queryAll(full, '.dict-links').length === 1);
+
+  // the 没有任何例句：compact 不造主例句，改给 3 个查词典外链
+  const theEntry = win.WB.at(0);
+  const noEx = win.DefsView.render(theEntry, { compact: true });
+  check('  无例句词不硬造主例句', queryAll(noEx, '.main-example').length === 0);
+  const links = queryAll(noEx, '.dict-link');
+  check('  无双语例句时给 3 个查词典外链', links.length === 3, '实际 ' + links.length);
+  check('  词典链接指向当前词', links.every(function (a) { return /the/.test(a.attrs.href); }));
+
+  // 发音模块新接口与无语音环境降级
+  check('  Speak 提供 setAccent/hasVoice',
+        typeof win.Speak.setAccent === 'function' && typeof win.Speak.hasVoice === 'function');
+  win.Speak.setAccent('gb'); win.Speak.setAccent('us');
+  check('  无 speechSynthesis 时 available=false 且不抛错', win.Speak.available() === false);
+})();
+
 /* --- 死代码是否真的清干净了 --- */
 section('旧的义项级标注已移除');
 check('WB.rareDefs 已删除', typeof win.WB.rareDefs === 'undefined');

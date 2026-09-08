@@ -15,6 +15,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="考研词汇">
 <meta name="description" content="考研英语一大纲 5530 词 · 三级分类 + 间隔重复">
+<!-- 代码更新后别让浏览器/CDN 把旧 HTML 钉住：HTML 每次都回源校验。
+     真正的离线缓存由 sw.js 用 network-first 管理，二者不冲突。 -->
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 
 <style>
 /* ===========================================================================
@@ -695,6 +699,38 @@ nav.tabs.is-dim { opacity: .45; }
 .ex-en .speak-btn { flex-shrink: 0; }
 .ex-zh { margin: 0; font-size: .85rem; color: var(--text-muted); line-height: 1.5; }
 .speak-btn--sm { width: 25px; height: 25px; font-size: .7rem; margin-top: 2px; }
+
+/* 主例句：记忆主力，视觉权重仅次于中文释义 —— 短、双语、可朗读 */
+.main-example {
+  margin: 8px 0 4px; padding: 9px 12px; border-radius: 10px;
+  background: var(--surface-2); border-left: 3px solid var(--series-1);
+}
+.main-ex-en { margin: 0 0 4px !important; font-size: .98rem; font-weight: 600; }
+.main-ex-zh { color: var(--text-secondary); font-size: .88rem; }
+
+/* 折叠区：更多例句 / 真题长难句 / 相关词，默认收起，需要才展开 */
+.dv-fold { margin-top: 8px; border-top: 1px dashed var(--border); }
+.dv-fold-sum {
+  cursor: pointer; padding: 8px 2px 6px; list-style: none;
+  color: var(--text-secondary); font-size: .78rem; user-select: none;
+  display: flex; align-items: center; gap: 6px;
+}
+.dv-fold-sum::-webkit-details-marker { display: none; }
+.dv-fold-sum::before { content: '\25B8'; font-size: .68rem; transition: transform .15s ease; }
+.dv-fold[open] .dv-fold-sum::before { transform: rotate(90deg); }
+.dv-fold-body { padding: 2px 0 6px; }
+.dv-fold--cite .dv-fold-sum { color: var(--series-1); }
+.related-text { font-size: .86rem; color: var(--text-secondary); line-height: 1.7; }
+
+/* 查词典外链（缺双语例句时补中文/真人发音；词书页常驻） */
+.dict-links { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 10px; }
+.dict-hint { font-size: .74rem; color: var(--text-muted); letter-spacing: .08em; }
+.dict-link {
+  font-size: .76rem; padding: 2px 11px; border-radius: 20px;
+  border: 1px solid var(--border); color: var(--series-1);
+  text-decoration: none; background: var(--surface-2);
+}
+.dict-link:active { transform: scale(.95); }
 
 /* ------------------------------------------------------------------ 普查 */
 
@@ -1646,8 +1682,47 @@ button.action-card { appearance: none; cursor: pointer; font: inherit; text-alig
 (function () {
   if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
   if (!('serviceWorker' in navigator)) return;
+
+  // 记录进入页面时是否「已有」SW 控制：首次访问没有（=首次安装，不该刷新），
+  // 之后再打开且这里为 true，说明本次是版本更新，才允许自动刷新到新版。
+  var hadController = !!navigator.serviceWorker.controller;
+  var reloaded = false;
+
+  function reloadOnce() {
+    if (reloaded || !hadController) return;
+    reloaded = true;
+    try {
+      // sessionStorage 双保险：同一会话只因更新自动刷新一次，杜绝刷新死循环
+      if (sessionStorage.getItem('kv_sw_reloaded')) return;
+      sessionStorage.setItem('kv_sw_reloaded', '1');
+    } catch (e) {}
+    location.reload();
+  }
+
+  // 新 SW 接管页面 → 刷新一次，拿到它缓存的新 html/js
+  navigator.serviceWorker.addEventListener('controllerchange', reloadOnce);
+
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('sw.js').catch(function (e) {
+    // updateViaCache:'none' —— 每次导航都重新拉 sw.js 本身，不吃它 10 分钟的 HTTP 缓存
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(function (reg) {
+      function watch(sw) {
+        if (!sw) return;
+        sw.addEventListener('statechange', function () {
+          // 新 SW 安装完成进入 activated，且本页原本被旧 SW 控制 → 刷新
+          if (sw.state === 'activated') reloadOnce();
+        });
+      }
+      watch(reg.installing);
+      reg.addEventListener('updatefound', function () { watch(reg.installing); });
+
+      // 收到 sw.js activate 时的「已更新」广播
+      navigator.serviceWorker.addEventListener('message', function (ev) {
+        if (ev.data && ev.data.type === 'SW_UPDATED') reloadOnce();
+      });
+
+      // 每次打开主动检查一次更新（在线、轻量；network-first 开销很小）
+      try { reg.update(); } catch (e) {}
+    }).catch(function (e) {
       if (window.console) console.debug('[sw] 注册失败，离线功能不可用', e);
     });
   });

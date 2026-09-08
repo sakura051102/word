@@ -194,7 +194,7 @@ window.Rapid = (function () {
     box.appendChild(window.DefsView.head(entry, { big: true }));
 
     if (run.showDef) {
-      box.appendChild(window.DefsView.render(entry, { citeLimit: 1 }));
+      box.appendChild(window.DefsView.render(entry, { compact: true, citeLimit: 1 }));
     } else {
       box.appendChild(el('div', { class: 'card-actions' }, [
         el('button', { class: 'btn', type: 'button', text: '显示释义（可选）',

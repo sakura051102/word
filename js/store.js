@@ -29,7 +29,8 @@ window.Store = (function () {
       dailyNew: 30,                   // 每日新投放上限
       quota: [6, 3],                  // L1:L2 新词投放配额（L3 不进主复习，无配额）
       triageBatch: 100,               // 普查每批词数
-      autoSpeak: true,                // 翻面自动朗读
+      autoSpeak: true,                // 出现单词/翻面时自动朗读
+      accent: 'us',                   // 发音口音：us 美音 | gb 英音
       reviewBeforeTriageDone: false,  // 允许普查未完成就开始复习
       quizRatio: 0.5,                 // 选择题占比
       theme: 'auto',                  // auto | light | dark
