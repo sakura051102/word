@@ -877,6 +877,16 @@ nav.tabs.is-dim { opacity: .45; }
 :root[data-theme="light"] .lv-pill--1.is-active { color: #0b3a4a; }
 :root[data-theme="light"] .lv-pill--2.is-active,
 :root[data-theme="light"] .lv-pill--3.is-active { color: #fff; }
+/* 「丢进熟词速过池」：区别于 L1/L2 归类，虚线、用熟词色、靠右 */
+.lv-pill--rapid {
+  margin-left: auto; border-style: dashed;
+  border-color: color-mix(in srgb, var(--series-l3) 55%, var(--border-strong));
+  color: var(--series-l3);
+}
+.lv-pill--rapid:hover {
+  background: color-mix(in srgb, var(--series-l3) 14%, transparent);
+  color: var(--series-l3);
+}
 
 /* 选择题 */
 .quiz-kind {
@@ -1291,6 +1301,12 @@ input:focus-visible, [tabindex]:focus-visible {
     flex: 1 1 auto; min-height: 0;
     overflow: auto; overscroll-behavior: contain; padding-right: 4px;
   }
+  /* 选择题作答后：正确释义才是重点。选项区只占自身内容高度、不再拉伸，
+     且把已无意义的干扰项直接隐藏（只留正确项和你错选的那项），
+     把剩余空间让给释义区，避免「意思被压在很小的滚动条里、一眼看不到」 */
+  .card--quiz:has(.quiz-verdict) .quiz-options { flex: 0 0 auto; max-height: none; overflow: visible; }
+  .card--quiz:has(.quiz-verdict) .quiz-opt.is-dim { display: none; }
+  .card--quiz:has(.quiz-verdict) .defs-view { flex: 1 1 auto; }
   .card-actions { margin-top: auto; }
 }
 
@@ -1339,6 +1355,9 @@ input:focus-visible, [tabindex]:focus-visible {
   .review-stage .card .defs-view,
   .triage-stage .triage-card .defs-view { max-height: 46dvh; }
   .review-stage .quiz-options { max-height: 44dvh; }
+  /* 作答后：干扰项已隐藏，选项区不设内部滚动；释义放宽到 60dvh 保证一眼看到正确意思 */
+  .review-stage .card--quiz:has(.quiz-verdict) .quiz-options { max-height: none; overflow: visible; }
+  .review-stage .card--quiz:has(.quiz-verdict) .defs-view { max-height: 60dvh; }
   .review-stage .word-head--big .word-text,
   .triage-stage .word-head--big .word-text { font-size: clamp(1.8rem, 6vh, 2.8rem); }
 }

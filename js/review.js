@@ -357,6 +357,13 @@ window.Review = (function () {
 
   function advance() {
     sess.pos++;
+    // 刚被「丢进熟词速过池」(L3) 或归档的词，其当天重学副本若还压在队列里就直接跳过，
+    // 不能让已经移出主复习的词又冒出来
+    while (sess.pos < sess.queue.length) {
+      const c = sess.queue[sess.pos] && sess.queue[sess.pos].card;
+      if (c && (c.level === 3 || c.archived)) sess.pos++;
+      else break;
+    }
     if (shouldFinish(sess.realDone, sess.totalItems, sess.pos, sess.queue.length)) {
       sess.stage = 'finished';
       flushTime();
@@ -640,12 +647,28 @@ window.Review = (function () {
     return (m % 1 === 0 ? m : m.toFixed(1)) + ' 个月后';
   }
 
+  /*
+   * 手动把「漏网熟词」直接送入熟词速过池（L3），并从本次主复习队列移除、
+   * 前进到下一张。用于：普查时本该归熟词却被分进 L1/L2 的词，复习时就地清走。
+   * manualSetLevel(3) 会按「原熟词 legacy」归类、按 L3 节奏重排，之后只在速过模式出现。
+   */
+  function sendToRapid(it) {
+    if (!it) return;
+    const wasRelearn = !!it.relearn;
+    E.manualSetLevel(it.card, 3);
+    S.save(); snapshot();
+    if (!wasRelearn) { sess.realDone++; sess.stats.done++; }
+    window.UI.toast(it.word + ' 已移入「熟词速过池」，不再出现在主复习', 'info', 2400);
+    window.Speak.stop();
+    advance();
+  }
+
   /* 手动改类别 */
   function levelSwitch(it) {
     const wrap = el('div', { class: 'lv-switch' }, [
       el('span', { class: 'lv-switch-label', text: '这个词归类为' })
     ]);
-    // 主复习只在 L1/L2 间手动调；L3 只能由系统自动升入或在词书页/速过模式管理
+    // L1/L2 间手动纠正归类
     [1, 2].forEach(function (lv) {
       const active = it.card.level === lv;
       wrap.appendChild(el('button', {
@@ -660,6 +683,12 @@ window.Review = (function () {
         }
       }, [el('span', { text: E.LEVELS[lv].name })]));
     });
+    // 漏网熟词：直接丢进熟词速过池（L3），并立刻从本次复习跳过
+    wrap.appendChild(el('button', {
+      class: 'lv-pill lv-pill--rapid', type: 'button',
+      title: '这个词其实早就会：移出主复习，放进熟词速过池',
+      onclick: function () { sendToRapid(it); }
+    }, [el('span', { text: '丢进熟词速过池 ↓' })]));
     return wrap;
   }
 

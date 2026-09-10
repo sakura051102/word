@@ -31,6 +31,7 @@ window.Store = (function () {
       triageBatch: 100,               // 普查每批词数
       autoSpeak: true,                // 出现单词/翻面时自动朗读
       accent: 'us',                   // 发音口音：us 美音 | gb 英音
+      onlineVoice: true,              // 单词优先在线真人发音（联网，失败自动回退系统语音）
       reviewBeforeTriageDone: false,  // 允许普查未完成就开始复习
       quizRatio: 0.5,                 // 选择题占比
       theme: 'auto',                  // auto | light | dark

@@ -450,6 +450,43 @@ if (opts.length) {
   }
 }
 
+/* ---- 复习中把「漏网熟词」直接丢进熟词速过池（L3）并移出本次复习 ---- */
+section('复习中丢进熟词速过池');
+S.get().settings.quizRatio = 0;
+S.get().cards = {};
+['account', 'compromise', 'wink'].forEach(function (w) {
+  S.get().cards[w] = win.Engine.createCard(1);
+});
+S.save();
+queryAll(nav, '.tab')[0].click();
+{
+  const rp = queryAll(main, '.action-card .btn').filter(function (b) {
+    return b.textContent.indexOf('复习') >= 0;
+  })[0];
+  if (rp) rp.click();
+}
+async function drainToRapid() {
+  await reveal();
+  const wt = queryAll(main, '.word-text')[0];
+  const w = wt ? wt.textContent : null;
+  const rapid = queryAll(main, '.lv-pill--rapid')[0];
+  check('背面有「丢进熟词速过池」按钮', !!rapid);
+  if (rapid) rapid.click();
+  return w;
+}
+const w1 = await drainToRapid();
+check('送池后该卡变为 L3', !!w1 && S.get().cards[w1].level === 3);
+check('  手动送池按原熟词 legacy 归类', !!w1 && S.get().cards[w1].l3Origin === 'legacy');
+check('  立即推进到下一张，不停在原词',
+      (queryAll(main, '.word-text')[0] || {}).textContent !== w1);
+for (let k = 0; k < 2; k++) { if (queryAll(main, '.card').length) await drainToRapid(); }
+check('三张全部送完后都是 L3',
+      Object.keys(S.get().cards).length === 3 &&
+      Object.values(S.get().cards).every(function (c) { return c.level === 3; }));
+check('  会话正常走到结束、不残留送池按钮',
+      queryAll(main, '.lv-pill--rapid').length === 0 &&
+      queryAll(main, '.grade-btn').length === 0);
+
 /* ---------------------------------------------------------------- 其他页 */
 
 section('词书 / 统计 / 设置');
@@ -588,11 +625,29 @@ section('复习卡背面信息分层（主例句 / 折叠 / 查词典）');
   check('  无双语例句时给 3 个查词典外链', links.length === 3, '实际 ' + links.length);
   check('  词典链接指向当前词', links.every(function (a) { return /the/.test(a.attrs.href); }));
 
-  // 发音模块新接口与无语音环境降级
+  // 发音模块新接口
   check('  Speak 提供 setAccent/hasVoice',
         typeof win.Speak.setAccent === 'function' && typeof win.Speak.hasVoice === 'function');
-  win.Speak.setAccent('gb'); win.Speak.setAccent('us');
-  check('  无 speechSynthesis 时 available=false 且不抛错', win.Speak.available() === false);
+
+  // 在线真人发音：单词走有道（美音 type=2 / 英音 type=1），整句不走在线
+  let mockSrc = null, mockPlayed = 0;
+  win.Audio = function () {
+    this.preload = '';
+    this.pause = function () {};
+    this.play = function () { mockPlayed++; return Promise.resolve(); };
+    Object.defineProperty(this, 'src', { set: function (v) { mockSrc = v; }, get: function () { return mockSrc; } });
+  };
+  win.Speak.setAccent('us'); win.Speak.say('account');
+  check('  单词优先在线真人音（美音 type=2）', /dictvoice/.test(mockSrc) && /type=2/.test(mockSrc), mockSrc);
+  win.Speak.setAccent('gb'); win.Speak.say('account');
+  check('  切英音用 type=1', /type=1/.test(mockSrc), mockSrc);
+  mockSrc = null; win.Speak.say('this is a long sentence with many words');
+  check('  整句不走在线真人音（交给系统语音）', mockSrc === null);
+  win.Speak.stop();
+  delete win.Audio;
+
+  win.Speak.setAccent('us');
+  check('  无 speechSynthesis 也无 Audio 时 available=false 且不抛错', win.Speak.available() === false);
 })();
 
 /* --- 死代码是否真的清干净了 --- */

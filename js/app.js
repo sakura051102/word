@@ -833,6 +833,11 @@
       window.Speak.setAccent(v);
       window.Speak.say('pronunciation');
     }), window.Speak.available() ? null : '当前浏览器不支持语音合成。'));
+
+    g2.appendChild(checkField('单词用在线真人发音（推荐）', s.onlineVoice !== false, function (v) {
+      s.onlineVoice = v; S.save();
+    }, '开启后点单词喇叭优先播放词典真人录音（需联网，国内可直连，最清晰）；'
+       + '关闭或断网时自动改用浏览器系统语音。整条例句朗读始终用系统语音。'));
     box.appendChild(g2);
 
     /* --- 外观 --- */

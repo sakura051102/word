@@ -106,6 +106,26 @@ window.Speak = (function () {
   let kickTimer = null;     // cancel 后延迟启动，绕开 iOS「cancel 后立即 speak 被吞」
   let guardTimer = null;    // 某些平台不触发 onend 时的兜底推进
   let curRate = 0.92;
+  let audioEl = null;       // 在线真人发音（HTMLAudio），单词优先用它
+
+  // 设置里是否允许「在线真人发音」（联网拿有道真人音，默认开）。
+  // 这是国内设备没装英文语音包 / Google 在线 TTS 不可达时仍能出声的关键。
+  function onlineEnabled() {
+    try {
+      const s = window.Store && window.Store.get() && window.Store.get().settings;
+      return !s || s.onlineVoice !== false;
+    } catch (e) { return true; }
+  }
+  function audio() {
+    if (audioEl) return audioEl;
+    try { audioEl = new Audio(); audioEl.preload = 'auto'; } catch (e) { audioEl = null; }
+    return audioEl;
+  }
+  // 只有「单词 / 短语」才走在线真人音（词典接口只支持词条）；整句交给 TTS
+  function isWordOrPhrase(t) {
+    const s = String(t).trim();
+    return s.length > 0 && s.split(/\s+/).length <= 2 && !/[.!?;。！？；]/.test(s);
+  }
 
   function normLang(v) { return (v.lang || '').replace('_', '-').toLowerCase(); }
 
@@ -163,8 +183,35 @@ window.Speak = (function () {
 
   function setAccent(a) { accent = (a === 'gb' ? 'gb' : 'us'); refresh(); }
 
-  function available() { return !!synth; }
+  // 有系统语音合成，或能播放在线音频，都算「可以发音」
+  function available() { return !!synth || typeof Audio !== 'undefined'; }
   function hasVoice() { return !!voice; }
+
+  /* 在线真人发音（有道词典，国内直连、免 key、真人录音）。
+     type=1 英音、type=2 美音。只用于单词/短语；播放失败自动回退系统 TTS。 */
+  function onlineSay(word) {
+    const a = audio();
+    if (!a) return false;
+    try {
+      const type = accent === 'gb' ? 1 : 2;
+      const url = 'https://dict.youdao.com/dictvoice?audio=' +
+                  encodeURIComponent(String(word).trim()) + '&type=' + type;
+      a.pause();
+      a.onended = null;
+      a.src = url;
+      const p = a.play();
+      if (p && typeof p.then === 'function') {
+        p.catch(function () { speakTTS(word); });   // 离线/被拦 → 回退系统语音
+      }
+      a.onerror = function () { speakTTS(word); };
+      return true;
+    } catch (e) { return false; }
+  }
+  function stopAudio() {
+    if (!audioEl) return;
+    try { audioEl.onended = null; audioEl.onerror = null; audioEl.pause(); audioEl.currentTime = 0; }
+    catch (e) {}
+  }
 
   /* 长句切短：单词/短语整块读；超过 14 词的句子按标点切成小块队列，
      规避 iOS SpeechSynthesis 读长句中途静默/截断的问题。 */
@@ -220,7 +267,8 @@ window.Speak = (function () {
     guardTimer = setTimeout(advance, Math.max(2500, text.length * 95) + 1500);
   }
 
-  function say(text, opts) {
+  // 系统语音合成（整句朗读，以及在线真人音失败时的兜底）
+  function speakTTS(text, opts) {
     if (!synth || !text) return false;
     curRate = (opts && opts.rate) || 0.92;
     try {
@@ -238,12 +286,28 @@ window.Speak = (function () {
     }
   }
 
+  /* 统一入口：单词/短语 → 在线真人音（失败回退 TTS）；整句 → 直接 TTS。
+     opts.force==='tts' 强制走系统语音。 */
+  function say(text, opts) {
+    if (!text) return false;
+    stopAudio();
+    if (synth) {
+      if (kickTimer) { clearTimeout(kickTimer); kickTimer = null; }
+      clearGuard();
+      try { synth.cancel(); } catch (e) {}
+    }
+    if ((!opts || opts.force !== 'tts') && isWordOrPhrase(text) && onlineEnabled()) {
+      if (onlineSay(text)) return true;
+    }
+    return speakTTS(text, opts);
+  }
+
   function stop() {
-    if (!synth) return;
+    stopAudio();
     queue = [];
     if (kickTimer) { clearTimeout(kickTimer); kickTimer = null; }
     clearGuard();
-    try { synth.cancel(); } catch (e) {}
+    if (synth) { try { synth.cancel(); } catch (e) {} }
   }
 
   return { init: init, say: say, stop: stop, available: available,
