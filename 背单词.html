@@ -434,6 +434,10 @@ nav.tabs.is-dim { opacity: .45; }
 }
 .action-card--sec { box-shadow: none; }
 .action-card--sec::before { opacity: .35; }
+/* 今天还有词要复习时，主行动卡用暖色描边+加粗顶条+标题高亮，强化「现在就去背」的拉力 */
+.action-card--urgent { outline: 1.5px solid color-mix(in srgb, var(--series-1) 42%, transparent); outline-offset: -1.5px; }
+.action-card--urgent::before { height: 3px; opacity: 1; }
+.action-card--urgent .action-title { color: var(--series-1); }
 
 .kicker {
   font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
@@ -1688,6 +1692,7 @@ button.action-card { appearance: none; cursor: pointer; font: inherit; text-alig
 <script src="js/triage.js"></script>
 <script src="js/review.js"></script>
 <script src="js/rapid.js"></script>
+<script src="js/remind.js"></script>
 <script src="js/app.js"></script>
 
 <!--
@@ -1741,6 +1746,14 @@ button.action-card { appearance: none; cursor: pointer; font: inherit; text-alig
 
       // 每次打开主动检查一次更新（在线、轻量；network-first 开销很小）
       try { reg.update(); } catch (e) {}
+
+      // 从后台切回 / 从 bfcache 恢复时也主动查一次。平板「添加到主屏幕」的应用
+      // 或长期挂着的标签不会重新触发 load，只在 load 时检查会让它一直停在旧版。
+      function onResume() { try { reg.update(); } catch (e) {} }
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') onResume();
+      });
+      window.addEventListener('pageshow', function (ev) { if (ev.persisted) onResume(); });
     }).catch(function (e) {
       if (window.console) console.debug('[sw] 注册失败，离线功能不可用', e);
     });

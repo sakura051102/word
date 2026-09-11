@@ -9,6 +9,9 @@
   const S  = window.Store;
   const E  = window.Engine;
 
+  // 应用版本号：每次发布改一下，设置页可见，用来判断平板/手机是不是已经更新到新版
+  const APP_VERSION = '2026.09.11';
+
   let mainEl = null;
   let navEl  = null;
   let view   = 'home';
@@ -281,7 +284,7 @@
           desc: '复习 ' + rev.due + ' 个 · 新学 ' + rev.newToStudy + ' 个',
           btn: '开始复习',
           onclick: function () { go('review'); },
-          secondary: true
+          secondary: true, urgent: true
         }));
       }
     } else {
@@ -299,7 +302,8 @@
           desc: '到期复习 ' + rev.due + ' 个 · 新学 ' + rev.newToStudy + ' 个',
           hint: revHint,
           btn: '开始复习',
-          onclick: function () { go('review'); }
+          onclick: function () { go('review'); },
+          urgent: true
         }));
       } else {
         const fc = E.forecast(st.cards, 8).slice(1).filter(function (x) { return x.count > 0; });
@@ -360,7 +364,10 @@
   }
 
   function actionCard(o) {
-    const card = el('section', { class: 'action-card' + (o.secondary ? ' action-card--sec' : '') }, [
+    const card = el('section', {
+      class: 'action-card' + (o.secondary ? ' action-card--sec' : '') +
+             (o.urgent ? ' action-card--urgent' : '')
+    }, [
       el('div', { class: 'kicker', text: o.kicker }),
       el('h2', { class: 'action-title', text: o.title }),
       o.desc ? el('p', { class: 'action-desc', text: o.desc }) : null
@@ -840,6 +847,61 @@
        + '关闭或断网时自动改用浏览器系统语音。整条例句朗读始终用系统语音。'));
     box.appendChild(g2);
 
+    /* --- 复习提醒 --- */
+    const gR = group('复习提醒');
+    gR.appendChild(el('p', { class: 'field-note', text:
+      '到点若今天还有单词没复习，就弹一条系统通知（需要网页或「添加到主屏幕」的应用开着/挂在后台）。' +
+      '想在网页完全关闭时也能被提醒，用最下面的「每日日历提醒」，导入系统日历后由平板/手机系统定点通知。' }));
+
+    gR.appendChild(checkField('开启每日复习提醒', s.remindEnabled === true, function (v) {
+      s.remindEnabled = v;
+      if (v) s.remindLastDate = null;
+      S.save();
+      if (v && window.Remind) {
+        window.Remind.request(function (perm) {
+          if (perm === 'granted') { window.Remind.tick(); window.UI.toast('已开启，每天 ' + S.get().settings.remindTime + ' 提醒', 'good'); }
+          else if (perm === 'unsupported') window.UI.toast('当前环境不支持系统通知（本地双击打开时如此），请用日历提醒', 'warn', 5000);
+          else window.UI.toast('通知权限未允许，请到浏览器/系统设置里允许通知', 'warn', 5000);
+          render();
+        });
+      }
+    }));
+
+    const timeInput = el('input', { class: 'input', type: 'time', value: s.remindTime || '20:00' });
+    timeInput.addEventListener('change', function () {
+      s.remindTime = timeInput.value || '20:00';
+      s.remindLastDate = null; S.save();
+      if (window.Remind) window.Remind.tick();
+    });
+    gR.appendChild(field('每日提醒时间', timeInput,
+      '只在这个时间之后、且今天还有单词没复习时弹，每天最多一条。'));
+
+    const remindRow = el('div', { class: 'btn-row' }, [
+      el('button', { class: 'btn', type: 'button', text: '发一条测试通知', onclick: function () {
+        if (!window.Remind) return;
+        window.Remind.test(function (p) {
+          window.UI.toast(p === 'granted' ? '已发送，请看系统通知中心'
+            : (p === 'unsupported' ? '当前环境不支持系统通知' : '没拿到通知权限：' + p), 'info', 4500);
+        });
+      }})
+    ]);
+    gR.appendChild(remindRow);
+
+    if (window.Remind) {
+      const pm = { granted: '已允许', denied: '已被拒绝（需到系统设置改）', default: '还没决定', unsupported: '当前环境不支持' };
+      gR.appendChild(el('p', { class: 'field-note',
+        text: '系统通知权限：' + (pm[window.Remind.permission()] || window.Remind.permission()) }));
+    }
+
+    gR.appendChild(el('div', { class: 'btn-row' }, [
+      el('button', { class: 'btn', type: 'button', text: '下载每日日历提醒（关网页也能响）', onclick: function () {
+        if (!window.Remind) return;
+        window.Remind.downloadCalendar(S.get().settings.remindTime || '20:00');
+        window.UI.toast('已下载 .ics：在平板上点开、导入「日历」即可每天定点提醒', 'good', 5500);
+      }})
+    ]));
+    box.appendChild(gR);
+
     /* --- 外观 --- */
     const g3 = group('外观');
     g3.appendChild(field('主题', select('主题', s.theme, [
@@ -949,7 +1011,52 @@
     }
     box.appendChild(g6);
 
+    /* --- 更新与关于：让用户能一眼判断平板是不是新版，并能一键自救旧缓存 --- */
+    const gU = group('更新与关于');
+    gU.appendChild(el('dl', { class: 'meta-list' }, [
+      el('dt', { text: '当前版本' }), el('dd', { text: APP_VERSION })
+    ]));
+    gU.appendChild(el('p', { class: 'field-note', text:
+      '默认每次打开、每次从后台切回都会自动检查最新版。若手机/平板看起来仍是旧版，' +
+      '点下面按钮清掉这台设备的离线缓存并强制刷新到最新（不会动你的学习记录）。' }));
+    gU.appendChild(el('div', { class: 'btn-row' }, [
+      el('button', { class: 'btn', type: 'button', text: '检查并更新到最新版', onclick: forceUpdate })
+    ]));
+    box.appendChild(gU);
+
     return box;
+  }
+
+  /* 一键强制更新：让 SW 立即接管新版本 + 删掉本应用的离线缓存 + 硬刷新。
+     这是「平板怎么刷都是旧版」时的用户侧兜底，不依赖自动更新时序。 */
+  async function forceUpdate() {
+    window.UI.toast('正在清理本机缓存并检查更新…', 'info');
+    try {
+      if ('serviceWorker' in navigator) {
+        try {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const r of regs) {
+            try {
+              await r.update();
+              if (r.waiting) r.waiting.postMessage({ type: 'SKIP_WAITING' });
+            } catch (e) {}
+          }
+        } catch (e) {}
+      }
+      if (window.caches) {
+        try {
+          const keys = await window.caches.keys();
+          await Promise.all(keys.filter(function (k) {
+            return k.indexOf('kaoyan-vocab-') === 0;
+          }).map(function (k) { return window.caches.delete(k); }));
+        } catch (e) {}
+      }
+    } finally {
+      setTimeout(function () {
+        try { sessionStorage.removeItem('kv_sw_reloaded'); } catch (e) {}
+        location.reload();
+      }, 600);
+    }
   }
 
   function group(title) {
@@ -1162,6 +1269,7 @@
     S.load();
     window.Speak.init();
     window.Speak.setAccent(S.get().settings.accent || 'us');
+    if (window.Remind) window.Remind.start();
     applyTheme();
     /* 特效层。init 内部会在 reduced-motion 或 WAAPI 不可用时自行空转，
        所以这里无条件调用即可，不需要判断。 */

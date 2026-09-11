@@ -32,6 +32,9 @@ window.Store = (function () {
       autoSpeak: true,                // 出现单词/翻面时自动朗读
       accent: 'us',                   // 发音口音：us 美音 | gb 英音
       onlineVoice: true,              // 单词优先在线真人发音（联网，失败自动回退系统语音）
+      remindEnabled: false,           // 每日复习提醒开关（系统通知，应用/PWA 开着时到点弹）
+      remindTime: '20:00',            // 每日提醒时间 HH:MM
+      remindLastDate: null,           // 最近一次已弹提醒的日期（保证每天至多一次）
       reviewBeforeTriageDone: false,  // 允许普查未完成就开始复习
       quizRatio: 0.5,                 // 选择题占比
       theme: 'auto',                  // auto | light | dark

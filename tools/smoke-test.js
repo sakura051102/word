@@ -267,7 +267,7 @@ function load(rel) {
   'data/sample.js', 'data/wordbook.js', 'data/corpus.js',
   'js/store.js', 'js/engine.js', 'js/wordbook.js', 'js/fx.js',
   'js/ui.js', 'js/charts.js', 'js/notebook.js', 'js/triage.js',
-  'js/review.js', 'js/rapid.js', 'js/app.js'
+  'js/review.js', 'js/rapid.js', 'js/remind.js', 'js/app.js'
 ].forEach(load);
 
 /* app.js 在 readyState==='complete' 时会立刻 boot() */
@@ -487,6 +487,26 @@ check('  会话正常走到结束、不残留送池按钮',
       queryAll(main, '.lv-pill--rapid').length === 0 &&
       queryAll(main, '.grade-btn').length === 0);
 
+/* ---- 每日复习提醒：纯判定 / 日历文件 / 无通知环境降级 ---- */
+section('每日复习提醒');
+{
+  const D = win.Remind.decide;
+  check('未到提醒时间不弹', D('07:59', '20:00', null, '2026-09-11', 10) === false);
+  check('正好到点且有待办、今天没弹过 → 弹', D('20:00', '20:00', null, '2026-09-11', 10) === true);
+  check('已过点（晚些才打开）也补弹', D('21:30', '20:00', null, '2026-09-11', 10) === true);
+  check('今天已弹过不再弹', D('21:30', '20:00', '2026-09-11', '2026-09-11', 10) === false);
+  check('今天已清完（待办 0）不打扰', D('21:30', '20:00', null, '2026-09-11', 0) === false);
+  check('昨天弹过不影响今天', D('20:00', '20:00', '2026-09-10', '2026-09-11', 3) === true);
+  const ics = win.Remind.calendarICS('20:30');
+  check('日历含每日重复 RRULE:FREQ=DAILY', /RRULE:FREQ=DAILY/.test(ics));
+  check('日历含到点闹钟 VALARM', /BEGIN:VALARM/.test(ics) && /TRIGGER:PT0M/.test(ics));
+  check('日历事件起始时间取设定的 20:30', /T203000/.test(ics));
+  check('无 Notification 环境安全降级', win.Remind.supported() === false);
+  let noThrow = true;
+  try { win.Remind.start(); win.Remind.tick(); } catch (e) { noThrow = false; }
+  check('无 Notification 时 start/tick 不抛错', noThrow);
+}
+
 /* ---------------------------------------------------------------- 其他页 */
 
 section('词书 / 统计 / 设置');
@@ -504,6 +524,19 @@ check('统计页渲染出图表卡', queryAll(main, '.chart-card').length > 0);
 queryAll(nav, '.tab')[3].click();
 check('设置页渲染出设置组', queryAll(main, '.set-group').length > 0);
 check('  含主题选择', queryAll(main, '.input--sel').length > 0);
+const hasSetGroup = function (t) {
+  return queryAll(main, '.set-title').some(function (n) { return n.textContent.indexOf(t) >= 0; });
+};
+check('  设置页含「复习提醒」组', hasSetGroup('复习提醒'));
+check('  设置页含「更新与关于」组', hasSetGroup('更新与关于'));
+check('  复习提醒含每日时间选择器', queryAll(main, 'input').some(function (i) {
+  return i.attrs && i.attrs.type === 'time';
+}));
+check('  含「检查并更新到最新版」按钮',
+      [].slice.call(main.querySelectorAll('button')).some(function (b) {
+        return b.textContent.indexOf('检查并更新') >= 0;
+      }));
+check('  显示当前版本号', /当前版本/.test(main.textContent));
 
 /* ---------------------------------------------------------------- 存档 */
 

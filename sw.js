@@ -19,7 +19,7 @@
  *    还是旧词库。改代码则不需要，network-first 会自动拉到最新。
  * =========================================================================== */
 
-const VERSION = 'v4';
+const VERSION = 'v5';
 const CACHE   = 'kaoyan-vocab-' + VERSION;
 
 /* 首次安装时预缓存的清单。
@@ -43,6 +43,7 @@ const ASSETS = [
   'js/triage.js',
   'js/review.js',
   'js/rapid.js',
+  'js/remind.js',
   'js/app.js',
   'icons/icon.svg',
   'icons/icon-192.png',
@@ -99,6 +100,14 @@ self.addEventListener('activate', function (e) {
       try { c.postMessage({ type: 'SW_UPDATED', version: VERSION }); } catch (e) {}
     });
   })());
+});
+
+/* 页面「检查并更新到最新版」按钮可指令等待中的新 SW 立即接管，
+   不必等所有标签关闭（配合页面随后的 reload 立刻拿到新版）。 */
+self.addEventListener('message', function (e) {
+  if (e.data && e.data.type === 'SKIP_WAITING') {
+    try { self.skipWaiting(); } catch (err) {}
+  }
 });
 
 /* ---------------------------------------------------------------- 请求 */
