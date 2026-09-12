@@ -283,7 +283,11 @@ window.Review = (function () {
       options: options.map(function (o) {
         return {
           text: mode === 'quiz-en2zh' ? window.WB.shortDef(o.entry, 40) : o.entry.word,
-          correct: o.correct
+          correct: o.correct,
+          // 保留干扰项对应的词条：答错时把「你选的这个其实是哪个词 / 什么意思」
+          // 一并展示，顺手多记一个词
+          word: o.entry.word,
+          other: mode === 'quiz-en2zh' ? o.entry.word : window.WB.shortDef(o.entry, 40)
         };
       }),
       chosen: -1
@@ -715,21 +719,48 @@ window.Review = (function () {
         else if (i === q.chosen) cls += ' is-wrong';
         else cls += ' is-dim';
       }
+      const optKids = [
+        el('kbd', { text: String(i + 1) }),
+        el('span', { class: 'opt-text', text: o.text })
+      ];
+      // 答错时，在被错选的那一项里直接点明「它其实是什么」，顺手多记一个词
+      if (answered && !o.correct && i === q.chosen) {
+        optKids.push(el('span', {
+          class: 'opt-extra',
+          text: q.mode === 'quiz-en2zh'
+            ? '（这个意思其实是「' + o.word + '」）'
+            : '（它其实意为：' + o.other + '）'
+        }));
+      }
       opts.appendChild(el('button', {
         class: cls, type: 'button', disabled: answered,
         onclick: function () { answerQuiz(i); }
-      }, [
-        el('kbd', { text: String(i + 1) }),
-        el('span', { class: 'opt-text', text: o.text })
-      ]));
+      }, optKids));
     });
     box.appendChild(opts);
     if (sess.stage === 'answered') {
-      const right = q.options[q.chosen] && q.options[q.chosen].correct;
+      const wrongOpt = q.options[q.chosen];
+      const right = wrongOpt && wrongOpt.correct;
       box.appendChild(el('div', {
         class: 'quiz-verdict ' + (right ? 'is-right' : 'is-wrong'),
         text: right ? '答对了' : '答错了 —— 这个词已重新排进高频复习'
       }));
+      // 答错时单独给一行「混淆词」对照 + 朗读（外层选项已 disabled，喇叭放这里才可点）
+      if (!right && wrongOpt) {
+        const confuseKids = [el('span', { class: 'quiz-confuse-text', text:
+          q.mode === 'quiz-en2zh'
+            ? '你选的意思其实是另一个词「' + wrongOpt.word + '」，顺带记一下它 →'
+            : '你选的「' + wrongOpt.word + '」其实意为：' + wrongOpt.other + ' →'
+        })];
+        if (window.Speak.available()) {
+          confuseKids.push(el('button', {
+            class: 'speak-btn speak-btn--sm', type: 'button',
+            title: '朗读这个被混淆的词', 'aria-label': '朗读被混淆的词',
+            onclick: function (e) { e.stopPropagation(); window.Speak.say(wrongOpt.word); }
+          }, [el('span', { text: '🔊', 'aria-hidden': 'true' })]));
+        }
+        box.appendChild(el('div', { class: 'quiz-confuse' }, confuseKids));
+      }
       box.appendChild(window.DefsView.render(it.entry, { compact: true, citeLimit: 2 }));
       box.appendChild(el('div', { class: 'card-actions' }, [
         el('button', {

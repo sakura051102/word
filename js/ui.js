@@ -343,11 +343,52 @@ window.DefsView = (function () {
     const showExtras  = opts.showExtras  !== false;
 
     const root  = el('div', { class: 'defs-view' });
+    const CU = window.Custom;
+    const mine = CU ? CU.get(entry.word, false) : null;
+    let editorOpen = false;
+    /* 增删改后整体重绘本释义区（保持编辑器开合状态）。
+       笔记逐字输入不走这里，避免重绘丢焦点。 */
+    function repaint() {
+      const p = root.parentNode;
+      if (!p) return;
+      const nv = render(entry, opts);
+      const ed2 = nv.querySelector ? nv.querySelector('.my-edit') : null;
+      if (editorOpen && ed2) ed2.open = true;
+      p.replaceChild(nv, root);
+    }
 
-    /* ① 义项（中文释义） */
+    /* ① 义项（中文释义）：被用户隐藏的自带释义不显示；每条自带释义可就地删掉 */
     const list = el('ul', { class: 'def-list' });
-    window.WB.studyDefs(entry).forEach(function (d) { list.appendChild(defRow(d)); });
+    window.WB.studyDefs(entry).forEach(function (d) {
+      if (CU && CU.isHidden(entry.word, d.text)) return;
+      list.appendChild(defRow(d, function () {
+        CU.hideDef(entry.word, d.text); editorOpen = true; repaint();
+      }));
+    });
     root.appendChild(list);
+
+    /* 用户自己补充的释义（紧跟自带释义，带「我补」标记、可再删） */
+    const mineList = el('ul', { class: 'def-list def-list--mine' });
+    (mine ? mine.defs : []).forEach(function (t, i) {
+      mineList.appendChild(myDefRow(entry.word, t, i, function () { editorOpen = true; repaint(); }));
+    });
+    if (mineList.childNodes.length) root.appendChild(mineList);
+
+    /* 我的笔记（非空才显示；逐字编辑时在编辑器里就地更新这块） */
+    const noteBox = el('div', { class: 'my-note' });
+    function paintNote(text) {
+      window.UI.clear(noteBox);
+      if (text && text.trim()) {
+        noteBox.appendChild(el('span', { class: 'my-note-tag', text: '笔记' }));
+        noteBox.appendChild(el('span', { class: 'my-note-text', text: text }));
+        if (!noteBox.parentNode) root.insertBefore(noteBox, rootEditAnchor());
+      } else if (noteBox.parentNode) {
+        noteBox.parentNode.removeChild(noteBox);
+      }
+    }
+    if (mine && mine.note) paintNote(mine.note);
+    // 笔记块固定插在「自定义编辑器」之前；编辑器尚未挂载时退化为追加到末尾
+    function rootEditAnchor() { return root.querySelector('details.my-edit'); }
 
     /* ② 主例句：挑最短的一条双语例句 —— 短、自然、带中文，最利于记忆提取 */
     const all = (entry.examples || []).filter(function (x) { return x && x.en; });
@@ -355,18 +396,18 @@ window.DefsView = (function () {
     const rest = all.filter(function (x) { return x !== main; });
     if (main) root.appendChild(mainExample(main));
 
-    /* ③ 短语搭配：复习卡只留前 3 条，避免一屏过载 */
-    if (showPhrases && entry.phrases && entry.phrases.length) {
-      const phrases = compact ? entry.phrases.slice(0, 3) : entry.phrases;
+    /* ③ 短语搭配：复习卡自带搭配只留前 3 条；用户自补的搭配始终全部显示 */
+    const builtinPhrases = entry.phrases || [];
+    const myPhrases = mine ? mine.phrases : [];
+    if (showPhrases && (builtinPhrases.length || myPhrases.length)) {
+      const phrases = compact ? builtinPhrases.slice(0, 3) : builtinPhrases;
       const box = el('div', { class: 'phrases' }, [
         el('div', { class: 'sub-head', text: '常用搭配' })
       ]);
       const ul = el('ul', { class: 'phrase-list' });
-      phrases.forEach(function (p) {
-        ul.appendChild(el('li', { class: 'phrase' }, [
-          el('code', { class: 'phrase-en', text: p.text }),
-          el('span', { class: 'phrase-zh', text: p.zh || '' })
-        ]));
+      phrases.forEach(function (p) { ul.appendChild(phraseRow(p, false)); });
+      myPhrases.forEach(function (p, i) {
+        ul.appendChild(myPhraseRow(entry.word, p, i, function () { editorOpen = true; repaint(); }));
       });
       box.appendChild(ul);
       root.appendChild(box);
@@ -412,10 +453,79 @@ window.DefsView = (function () {
       }
     }
 
-    /* ⑤ 查词典外链：复习卡只在缺少双语例句时出现以补中文/真人音，词书页常驻 */
+    /* ⑤ 自定义编辑器：补/删意思、补搭配、写笔记、恢复被隐藏的自带释义。
+       用原生 details 折叠，复习卡上默认收起，不占一屏空间。 */
+    root.appendChild(editor());
+
+    /* ⑥ 查词典外链：复习卡只在缺少双语例句时出现以补中文/真人音，词书页常驻 */
     if (!main || !compact) root.appendChild(dictLinks(entry.word));
 
     return root;
+
+    /* —— 编辑器（闭包内构建，能直接访问上面的 repaint/paintNote） —— */
+    function editor() {
+      const ed = el('details', { class: 'dv-fold my-edit' });
+      ed.appendChild(el('summary', { class: 'dv-fold-sum',
+        text: '✎ 补充 / 删减意思 · 搭配 · 笔记' }));
+      const body = el('div', { class: 'dv-fold-body my-edit-body' });
+      ed.addEventListener('toggle', function () { editorOpen = ed.open; });
+
+      // 补一条释义
+      const defIn = el('input', { class: 'input my-input', type: 'text',
+                                  placeholder: '补一个释义，回车添加' });
+      const defAdd = el('button', { class: 'btn btn--ghost my-add', type: 'button', text: '加意思' });
+      function doAddDef() {
+        if (CU && CU.addDef(entry.word, defIn.value)) { editorOpen = true; repaint(); }
+        else defIn.value = '';
+      }
+      defAdd.addEventListener('click', doAddDef);
+      defIn.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); doAddDef(); }
+      });
+      body.appendChild(el('div', { class: 'my-row' }, [defIn, defAdd]));
+
+      // 补一条搭配（英文 + 可选中文）
+      const phEn = el('input', { class: 'input my-input', type: 'text', placeholder: '词组/固定搭配（英文）' });
+      const phZh = el('input', { class: 'input my-input', type: 'text', placeholder: '中文（可不填）' });
+      const phAdd = el('button', { class: 'btn btn--ghost my-add', type: 'button', text: '加搭配' });
+      function doAddPhrase() {
+        if (CU && CU.addPhrase(entry.word, phEn.value, phZh.value)) { editorOpen = true; repaint(); }
+        else phEn.value = '';
+      }
+      phAdd.addEventListener('click', doAddPhrase);
+      body.appendChild(el('div', { class: 'my-row' }, [phEn, phZh, phAdd]));
+
+      // 自由笔记（逐字保存、就地刷新笔记块，不整体重绘以免丢焦点）
+      const ta = el('textarea', { class: 'input my-note-input', rows: '2',
+                                  placeholder: '记点什么：词义辨析、记忆法、易混点……' });
+      if (mine) ta.value = mine.note || '';
+      ta.addEventListener('input', function () {
+        if (!CU) return;
+        CU.setNote(entry.word, ta.value);
+        paintNote(ta.value);
+      });
+      body.appendChild(ta);
+
+      // 被隐藏的自带释义，可逐条恢复
+      const hidden = mine ? mine.hide : [];
+      if (hidden.length) {
+        body.appendChild(el('div', { class: 'sub-head', text: '已隐藏的自带释义（点恢复）' }));
+        hidden.forEach(function (t) {
+          body.appendChild(el('div', { class: 'my-hidden' }, [
+            el('span', { class: 'my-hidden-text', text: t }),
+            el('button', {
+              class: 'btn btn--ghost my-restore', type: 'button', text: '恢复',
+              onclick: function () { CU.unhideDef(entry.word, t); editorOpen = true; repaint(); }
+            })
+          ]));
+        });
+      }
+
+      body.appendChild(el('p', { class: 'field-note my-tip', text:
+        '你补充的内容只存在本机、会随备份导出；「删掉」自带释义只是隐藏，随时可在此恢复。' }));
+      ed.appendChild(body);
+      return ed;
+    }
   }
 
   /* 从候选例句里挑「主例句」：优先带中文的，再取英文最短的一条 */
@@ -497,10 +607,51 @@ window.DefsView = (function () {
     return row;
   }
 
-  /* 单条义项 */
-  function defRow(d) {
-    return el('li', { class: 'def' }, [
-      el('span', { class: 'def-text', text: (d && d.text) || '' })
+  /* 单条自带义项；onHide 存在时附一个小 × 用来隐藏（删掉）该义项 */
+  function defRow(d, onHide) {
+    const kids = [el('span', { class: 'def-text', text: (d && d.text) || '' })];
+    if (onHide && window.Custom) kids.push(el('button', {
+      class: 'def-del', type: 'button', title: '隐藏这条自带释义（可在下方编辑器恢复）',
+      'aria-label': '隐藏这条释义',
+      onclick: function (e) { e.stopPropagation(); onHide(); }
+    }, [el('span', { text: '×', 'aria-hidden': 'true' })]));
+    return el('li', { class: 'def' }, kids);
+  }
+
+  /* 用户自补义项：带「我补」标记、可删除 */
+  function myDefRow(word, text, idx, onDel) {
+    return el('li', { class: 'def def--mine' }, [
+      el('span', { class: 'mine-tag', text: '我补' }),
+      el('span', { class: 'def-text', text: text }),
+      el('button', {
+        class: 'def-del', type: 'button', title: '删除这条我补的释义', 'aria-label': '删除',
+        onclick: function (e) {
+          e.stopPropagation(); window.Custom.removeDef(word, idx); onDel();
+        }
+      }, [el('span', { text: '×', 'aria-hidden': 'true' })])
+    ]);
+  }
+
+  /* 一条搭配；mine=true 时为用户自补（调用方另行加删除按钮见 myPhraseRow） */
+  function phraseRow(p, mine) {
+    return el('li', { class: 'phrase' + (mine ? ' phrase--mine' : '') }, [
+      el('code', { class: 'phrase-en', text: p.text }),
+      el('span', { class: 'phrase-zh', text: p.zh || '' })
+    ]);
+  }
+
+  /* 用户自补搭配：带「我补」标记、可删除 */
+  function myPhraseRow(word, p, idx, onDel) {
+    return el('li', { class: 'phrase phrase--mine' }, [
+      el('span', { class: 'mine-tag', text: '我补' }),
+      el('code', { class: 'phrase-en', text: p.text }),
+      el('span', { class: 'phrase-zh', text: p.zh || '' }),
+      el('button', {
+        class: 'def-del', type: 'button', title: '删除这条我补的搭配', 'aria-label': '删除',
+        onclick: function (e) {
+          e.stopPropagation(); window.Custom.removePhrase(word, idx); onDel();
+        }
+      }, [el('span', { text: '×', 'aria-hidden': 'true' })])
     ]);
   }
 

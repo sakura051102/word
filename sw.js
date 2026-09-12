@@ -19,7 +19,7 @@
  *    还是旧词库。改代码则不需要，network-first 会自动拉到最新。
  * =========================================================================== */
 
-const VERSION = 'v5';
+const VERSION = 'v6';
 const CACHE   = 'kaoyan-vocab-' + VERSION;
 
 /* 首次安装时预缓存的清单。
@@ -37,6 +37,7 @@ const ASSETS = [
   'js/engine.js',
   'js/wordbook.js',
   'js/fx.js',
+  'js/custom.js',
   'js/ui.js',
   'js/charts.js',
   'js/notebook.js',

@@ -632,6 +632,45 @@ nav.tabs.is-dim { opacity: .45; }
 }
 .def-text { color: var(--text-primary); }
 
+/* 用户自补释义 / 搭配 / 笔记 */
+.def-list--mine { margin-top: 8px; }
+.def--mine, .phrase--mine { border-left-color: color-mix(in srgb, var(--series-1) 55%, transparent); }
+.mine-tag {
+  flex-shrink: 0; font-size: .68rem; font-weight: 700; letter-spacing: .04em;
+  padding: 0 6px; border-radius: 6px; line-height: 1.55; white-space: nowrap;
+  color: var(--series-1);
+  border: 1px solid color-mix(in srgb, var(--series-1) 45%, transparent);
+  background: color-mix(in srgb, var(--series-1) 12%, transparent);
+}
+.def-del {
+  appearance: none; border: none; background: none; cursor: pointer;
+  color: var(--text-muted); font-size: .98rem; line-height: 1; padding: 0 3px;
+  border-radius: 6px; opacity: .45; transition: opacity .15s, color .15s;
+}
+.def:hover > .def-del, .phrase:hover > .def-del { opacity: .85; }
+.def-del:hover { opacity: 1 !important; color: var(--critical); }
+.my-note {
+  display: flex; gap: 8px; align-items: baseline; margin-top: 8px;
+  padding: 8px 11px; border-radius: 10px;
+  background: color-mix(in srgb, var(--series-1) 8%, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--series-1) 22%, transparent);
+}
+.my-note-tag { flex-shrink: 0; font-size: .68rem; font-weight: 700; color: var(--series-1); }
+.my-note-text { white-space: pre-wrap; line-height: 1.6; font-size: .9rem; color: var(--text-primary); }
+.my-edit { margin-top: 8px; }
+.my-edit-body { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.my-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.my-input { flex: 1 1 130px; min-width: 0; padding: 8px 10px; font: inherit; font-size: .88rem; border-radius: 10px; }
+textarea.my-note-input { width: 100%; resize: vertical; line-height: 1.6; }
+.my-add { flex: 0 0 auto; white-space: nowrap; }
+.my-hidden {
+  display: flex; align-items: center; gap: 8px; justify-content: space-between;
+  padding: 5px 9px; border-radius: 8px; background: var(--surface-2); font-size: .85rem;
+}
+.my-hidden-text { color: var(--text-secondary); }
+.my-restore { padding: 3px 10px; font-size: .78rem; flex: 0 0 auto; }
+.my-tip { font-size: .76rem; }
+
 /* ★ 那套「义项级真题标注」的样式已经删掉了 ——
    词库里 defs[].tag / defs[].count 五千多条全是空，那些规则一个像素都没渲染过。
    现在换成下面的【词条级】真题原句：不做词义消歧，只把原句原样摆出来。 */
@@ -928,6 +967,17 @@ nav.tabs.is-dim { opacity: .45; }
 .quiz-verdict { font-weight: 650; padding: 9px 0; }
 .quiz-verdict.is-right { color: var(--good-text); text-shadow: 0 0 16px color-mix(in srgb, var(--good) 50%, transparent); }
 .quiz-verdict.is-wrong { color: var(--critical); }
+/* 答错时：错选项内的「其实是哪个词」小字 + 判定下方的混淆词对照行 */
+.opt-extra { display: block; margin-top: 3px; text-align: left; font-size: .8rem; font-weight: 500; color: var(--text-muted); }
+.quiz-confuse {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 11px; border-radius: 10px; margin: 2px 0;
+  background: color-mix(in srgb, var(--critical) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--critical) 26%, transparent);
+  font-size: .86rem; color: var(--text-primary);
+}
+.quiz-confuse-text { flex: 1 1 auto; }
+.quiz-confuse .speak-btn { flex: 0 0 auto; }
 
 .card--upgrade { text-align: center; align-items: center; }
 .upgrade-word {
@@ -1686,6 +1736,7 @@ button.action-card { appearance: none; cursor: pointer; font: inherit; text-alig
 <script src="js/engine.js"></script>
 <script src="js/wordbook.js"></script>
 <script src="js/fx.js"></script>
+<script src="js/custom.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/charts.js"></script>
 <script src="js/notebook.js"></script>

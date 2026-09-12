@@ -51,6 +51,9 @@ window.Store = (function () {
     levelSnap: {},                    // YYYY-MM-DD -> [L1数, L2数, L3数]
     upgradeSnooze: {},                // word -> 该日期前不再提示升级（保留，自动升级后基本不再用）
     notebooks: {},                    // nbId -> {id,name,words:[],createdAt} 自定义单词本
+    // 用户对词条的自定义内容：word -> {defs:[我补的释义], hide:[被我删掉的自带释义文本],
+    //                                  phrases:[{text,zh} 我补的搭配], note:'我的笔记'}
+    custom: {},
     lastExportAt: null,               // 上次手动导出备份的日期（备份提醒用）
     lastExportCount: 0                // 上次导出时已建档词数（增量达 500 提醒）
   };

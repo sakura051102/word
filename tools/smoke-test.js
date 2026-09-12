@@ -101,6 +101,20 @@ function makeNode(tag) {
     if (i >= 0) { n.childNodes.splice(i, 1); c.parentNode = null; }
     return c;
   };
+  // ref 为 null 时等价于 appendChild（与真实 DOM 一致）
+  n.insertBefore = function (c, ref) {
+    if (!c) return c;
+    if (c.parentNode) c.parentNode.removeChild(c);
+    if (!ref) { n.childNodes.push(c); c.parentNode = n; return c; }
+    const i = n.childNodes.indexOf(ref);
+    n.childNodes.splice(i < 0 ? n.childNodes.length : i, 0, c);
+    c.parentNode = n; return c;
+  };
+  n.replaceChild = function (nw, old) {
+    const i = n.childNodes.indexOf(old);
+    if (i >= 0) { n.childNodes.splice(i, 1, nw); old.parentNode = null; nw.parentNode = n; }
+    return old;
+  };
   n.setAttribute = function (k, v) {
     n.attrs[k] = String(v);
     if (k === 'class') n._cls = String(v);
@@ -266,7 +280,7 @@ function load(rel) {
 [
   'data/sample.js', 'data/wordbook.js', 'data/corpus.js',
   'js/store.js', 'js/engine.js', 'js/wordbook.js', 'js/fx.js',
-  'js/ui.js', 'js/charts.js', 'js/notebook.js', 'js/triage.js',
+  'js/custom.js', 'js/ui.js', 'js/charts.js', 'js/notebook.js', 'js/triage.js',
   'js/review.js', 'js/rapid.js', 'js/remind.js', 'js/app.js'
 ].forEach(load);
 
@@ -440,6 +454,13 @@ if (opts.length) {
   opts[0].click();
   check('作答后出现判定文字', queryAll(main, '.quiz-verdict').length === 1);
   check('  选项已禁用，防止改答案', queryAll(main, '.quiz-opt')[0].disabled === true);
+  // 若这一题恰好答错：必须给出「你选的其实是哪个词」对照（随机命中，命中即校验）
+  const vNode = queryAll(main, '.quiz-verdict')[0];
+  const vWrong = vNode && /is-wrong/.test(vNode.attrs.class || '');
+  if (vWrong) {
+    check('  答错时出现混淆词对照行', queryAll(main, '.quiz-confuse').length === 1);
+    check('  错选项内标注「其实是…」', queryAll(main, '.opt-extra').length === 1);
+  }
   const cont = queryAll(main, '.card-actions .btn')[0];
   check('有「继续」按钮', !!cont);
   if (cont) {
@@ -681,6 +702,39 @@ section('复习卡背面信息分层（主例句 / 折叠 / 查词典）');
 
   win.Speak.setAccent('us');
   check('  无 speechSynthesis 也无 Audio 时 available=false 且不抛错', win.Speak.available() === false);
+})();
+
+/* --- 用户自定义：补/删释义、补搭配、写笔记 --- */
+section('自定义释义 / 搭配 / 笔记');
+(function () {
+  const W = 'account';
+  const entry = win.WB.at(win.WB.indexOf(W));
+  const hiddenText = entry.defs[0].text;
+  delete S.get().custom[W]; S.save();
+  check('  初始无自定义内容', win.Custom.isEmpty(W));
+  win.Custom.addDef(W, '我补的释义XYZ');
+  win.Custom.hideDef(W, hiddenText);
+  win.Custom.addPhrase(W, 'account for sth', '解释；占比');
+  win.Custom.setNote(W, '易混：account for');
+  check('  空释义/重复释义被拒绝',
+        win.Custom.addDef(W, '   ') === false && win.Custom.addDef(W, '我补的释义XYZ') === false);
+
+  const node = win.DefsView.render(entry, { compact: true, citeLimit: 2 });
+  const defTexts = queryAll(node, '.def-text').map(function (n) { return n.textContent; });
+  check('  被隐藏的自带释义不再显示', defTexts.every(function (t) { return t !== hiddenText; }), hiddenText);
+  check('  自补释义出现在列表', defTexts.some(function (t) { return t.indexOf('我补的释义XYZ') >= 0; }));
+  const note = node.querySelector('.my-note');
+  check('  笔记块渲染且内容正确', !!note && note.textContent.indexOf('account for') >= 0);
+  check('  自补搭配渲染', queryAll(node, '.phrase--mine').some(function (n) {
+    return n.textContent.indexOf('account for sth') >= 0;
+  }));
+  check('  自定义编辑器存在', queryAll(node, '.my-edit').length === 1);
+
+  win.Custom.unhideDef(W, hiddenText);
+  const node2 = win.DefsView.render(entry, { compact: true });
+  check('  恢复后自带释义回来',
+        queryAll(node2, '.def-text').some(function (n) { return n.textContent === hiddenText; }));
+  delete S.get().custom[W]; S.save();
 })();
 
 /* --- 死代码是否真的清干净了 --- */
