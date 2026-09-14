@@ -120,7 +120,7 @@ section('向前兼容：老存档缺字段由默认值补齐');
     version: 1, cards: { x: { level: 1 } }   // 缺 settings/triage/daily/新字段
   }) });
   const st = env.S.load();
-  check('settings 补齐', st.settings && st.settings.dailyNew === 30);
+  check('settings 补齐', st.settings && st.settings.dailyNew === 40);
   check('新增的 lastExportAt 补齐为 null', st.lastExportAt === null);
   check('triage 补齐', st.triage && st.triage.cursor === 0);
   check('version 归一到当前版本', st.version === env.S.CURRENT_VERSION);

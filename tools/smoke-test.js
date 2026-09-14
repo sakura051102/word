@@ -854,6 +854,9 @@ st3.settings.examDate = null;
 st3.settings.autoPace = false;
 st3.settings.dailyNew = 30;
 S.reset();   // extraNew 已在 daily 里，reset 清掉；重造 100 个未学
+// reset 会回到默认值，手动模式参数必须在 reset 之后重新钉死，否则断言依赖默认值
+S.get().settings.autoPace = false;
+S.get().settings.dailyNew = 30;
 for (let i = 0; i < 100; i++) S.get().cards[win.WB.at(i).word] = win.Engine.createCard(1);
 S.save();
 S.bump('extraNew', 15);

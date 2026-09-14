@@ -10,7 +10,7 @@
   const E  = window.Engine;
 
   // 应用版本号：每次发布改一下，设置页可见，用来判断平板/手机是不是已经更新到新版
-  const APP_VERSION = '2026.09.12';
+  const APP_VERSION = '2026.09.14';
 
   let mainEl = null;
   let navEl  = null;

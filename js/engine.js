@@ -26,9 +26,12 @@ window.Engine = (function () {
   const EASE_MAX     = 3.0;
   const MAX_INTERVAL = 180;   // 备考周期内间隔超过半年没意义，也防止词彻底消失
 
-  /* 自动升级门槛（连对 streak 次、且间隔已被拉到 interval 天以上才升） */
+  /* 自动升级门槛（连对 streak 次、且间隔已被拉到 interval 天以上才升）
+     L1→L2 门槛特意取 3：生词只在第 1、3 天密集回访两次就转入更疏的 L2，
+     砍掉最密的早期重复，避免复习量随存量滚雪球、把新词推进拖慢；
+     升级后间隔直接跳到 L2 起点 5 天，「L1 隔天见 / L2 五天见」的频率差依旧明显。 */
   const UPGRADE = {
-    1: { streak: 3, interval: 5  },   // L1 → L2（生词稳定几次后降为眼熟）
+    1: { streak: 3, interval: 3  },   // L1 → L2（生词连对 3 次、间隔拉到 3 天即降为眼熟）
     2: { streak: 3, interval: 21 }    // L2 → L3（眼熟长期稳定后升入熟词速过池）
   };
 

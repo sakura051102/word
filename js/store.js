@@ -26,7 +26,7 @@ window.Store = (function () {
   const DEFAULTS = {
     version: 2,
     settings: {
-      dailyNew: 30,                   // 每日新投放上限
+      dailyNew: 40,                   // 每日新投放上限（配合 L1 提早升 L2，加快一轮过完）
       quota: [6, 3],                  // L1:L2 新词投放配额（L3 不进主复习，无配额）
       triageBatch: 100,               // 普查每批词数
       autoSpeak: true,                // 出现单词/翻面时自动朗读

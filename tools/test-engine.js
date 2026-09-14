@@ -76,12 +76,12 @@ section('L1 生词：连续「认识」的间隔序列');
     const ev = r.events.filter(function (e) { return e.type === 'upgrade'; })[0];
     if (ev) { upAt = i; upEv = ev; }
   }
-  // L1 initial=1、growth=1.5：1 → 2 → 3 → 5；第 4 次 interval=5 达标升 L2，
-  // 第 5 次起按 L2 growth=2.2：5 → 11
-  check('L1 序列 1,2,3,5，升 L2 后跳到 11', eq(seq, [1, 2, 3, 5, 11]), '实际 ' + seq.join(','));
-  // 升级门槛 streak>=3 且 interval>=5：第 3 次 interval=3 不够，第 4 次 interval=5 达标
-  check('第 4 次（interval=5）自动 L1→L2',
-        upAt === 4 && upEv && upEv.from === 1 && upEv.to === 2, '实际第 ' + upAt + ' 次');
+  // L1 initial=1、growth=1.5：1 → 2 →（第 3 次 interval=3 达标）升 L2 跳到 5，
+  // 之后按 L2 growth=2.2：5 → 11 → 24
+  check('L1 序列 1,2 后升 L2 跳到 5，再按 L2 11,24', eq(seq, [1, 2, 5, 11, 24]), '实际 ' + seq.join(','));
+  // 升级门槛 streak>=3 且 interval>=3：第 3 次 interval=3 即达标，提早升入 L2
+  check('第 3 次（interval=3）自动 L1→L2',
+        upAt === 3 && upEv && upEv.from === 1 && upEv.to === 2, '实际第 ' + upAt + ' 次');
   check('自动升级立即生效、无需确认弹窗', c.level === 2, '实际 level=' + c.level);
 })();
 
@@ -168,9 +168,11 @@ section('L1 与 L2 频率差：同期眼熟间隔远大于生词（出现频率�
   for (let i = 0; i < 3; i++) { E.grade(a, 'good'); l1.push(a.interval); }
   const b = E.createCard(2), l2 = [];
   for (let i = 0; i < 3; i++) { E.grade(b, 'good'); l2.push(b.interval); }
-  check('L1 三次后间隔仅 3 天', eq(l1, [1, 2, 3]), '实际 ' + l1.join(','));
-  check('L2 三次后间隔 24 天，是 L1 的 5 倍以上', l2[2] >= l1[2] * 5,
-        'L1=' + l1[2] + ' L2=' + l2[2]);
+  // 新节奏：L1 升级前隔天见（1,2 天），第 3 次即升入 L2、间隔跳到 5 天
+  check('L1 隔天见两次后第 3 次升 L2、跳到 5 天', eq(l1, [1, 2, 5]) && a.level === 2,
+        '实际 ' + l1.join(',') + ' level=' + a.level);
+  check('L2 三次后间隔 24 天，远疏于 L1 密集期', l2[2] >= l1[1] * 10,
+        'L1 密集期末=' + l1[1] + ' L2=' + l2[2]);
 })();
 
 /* ============================================================ 4c. 永不复习 */

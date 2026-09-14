@@ -19,7 +19,7 @@
  *    还是旧词库。改代码则不需要，network-first 会自动拉到最新。
  * =========================================================================== */
 
-const VERSION = 'v6';
+const VERSION = 'v7';
 const CACHE   = 'kaoyan-vocab-' + VERSION;
 
 /* 首次安装时预缓存的清单。
