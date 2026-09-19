@@ -45,6 +45,8 @@ sandbox.Triage = { status: function () {
 const vocab = [];
 sandbox.WB = {
   get: function (w) { return vocab.indexOf(w) >= 0 ? { word: w } : null; },
+  at: function (i) { return { word: vocab[i] }; },
+  size: function () { return vocab.length; },
   indexOf: function (w) { return vocab.indexOf(w); },
   shuffle: function (a) { return a; }
 };
@@ -145,9 +147,21 @@ section('effectiveLimit：临考停新词、复习负载高时少投新词');
   check('临考缓冲期新词清零', R.effectiveLimit(st, 900) === 0);
 
   resetState(); st = S.get(); st.settings.autoPace = true;
+  st.settings.dailyNew = 0;                         // 关掉保底，单独验证均摊公式
   st.settings.examDate = S.addDays(S.today(), 100); // 可学 90 天，均摊 900/90=10
   const far = R.effectiveLimit(st, 900);
-  check('远期且无复习负载 → 按均摊投 10', far === 10, '实际 ' + far);
+  check('远期且无复习负载、保底0 → 按均摊投 10', far === 10, '实际 ' + far);
+
+  // 保底托底：均摊只有 10，但默认每日新词 40，必须给到 40（修复每天只投十几个）
+  resetState(); st = S.get(); st.settings.autoPace = true;
+  st.settings.examDate = S.addDays(S.today(), 100);
+  const farFloor = R.effectiveLimit(st, 900);       // resetState 后 dailyNew=默认 40
+  check('均摊 10 低于保底 40 → 托底到 40', farFloor === 40, '实际 ' + farFloor);
+
+  resetState(); st = S.get(); st.settings.autoPace = true;
+  st.settings.examDate = S.addDays(S.today(), 100);
+  check('整本词表学完（剩余 0）时保底不硬投、新词为 0', R.effectiveLimit(st, 0) === 0,
+        '实际 ' + R.effectiveLimit(st, 0));
 
   resetState(); st = S.get(); st.settings.autoPace = true;
   st.settings.examDate = S.addDays(S.today(), 20);  // 可学 10 天，均摊 900/10=90

@@ -943,7 +943,7 @@ textarea.my-note-input { width: 100%; resize: vertical; line-height: 1.6; }
 .quiz-options { display: flex; flex-direction: column; gap: 9px; }
 .quiz-opt {
   appearance: none; cursor: pointer; font: inherit; text-align: left;
-  display: flex; align-items: center; gap: 11px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 11px;
   padding: 13px 15px; min-height: 50px; border-radius: var(--radius);
   border: 1px solid var(--border-strong); background: var(--surface-2);
   color: var(--text-primary);
@@ -967,11 +967,17 @@ textarea.my-note-input { width: 100%; resize: vertical; line-height: 1.6; }
 .quiz-verdict { font-weight: 650; padding: 9px 0; }
 .quiz-verdict.is-right { color: var(--good-text); text-shadow: 0 0 16px color-mix(in srgb, var(--good) 50%, transparent); }
 .quiz-verdict.is-wrong { color: var(--critical); }
-/* 答错时：错选项内的「其实是哪个词」小字 + 判定下方的混淆词对照行 */
-.opt-extra { display: block; margin-top: 3px; text-align: left; font-size: .8rem; font-weight: 500; color: var(--text-muted); }
+/* 答错时：错选项内的「其实是哪个词」小字 + 判定下方的混淆词对照行。
+   选项是 flex 且允许换行：kbd+释义在第一行，小字 flex-basis:100% 强制独占第二行，
+   左内边距对齐到释义文字（避开序号 kbd 的宽度 + gap），长短选项排版统一、不再忽上忽右。 */
+.opt-extra {
+  flex: 0 0 100%; margin-top: 1px; text-align: left;
+  padding-left: calc(1.5em + 11px);
+  font-size: .8rem; font-weight: 500; color: var(--text-muted);
+}
 .quiz-confuse {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 8px 11px; border-radius: 10px; margin: 2px 0;
+  padding: 8px 11px; border-radius: 10px; margin: 5px 0 3px;
   background: color-mix(in srgb, var(--critical) 9%, transparent);
   border: 1px solid color-mix(in srgb, var(--critical) 26%, transparent);
   font-size: .86rem; color: var(--text-primary);
@@ -1340,7 +1346,7 @@ input:focus-visible, [tabindex]:focus-visible {
   /* 固定高度的头部 / 提示 / 操作区不缩，把弹性留给中间内容 */
   .word-head--big { flex: 0 0 auto; margin: 4px 0 2px; }
   .card-hint, .triage-hint, .keyhint, .quiz-kind,
-  .verify-banner, .quiz-verdict { flex: 0 0 auto; }
+  .verify-banner, .quiz-verdict, .quiz-confuse { flex: 0 0 auto; }
   .grade-row, .triage-actions, .verify-actions,
   .card-actions, .lv-switch { flex: 0 0 auto; }
 

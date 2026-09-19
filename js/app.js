@@ -10,7 +10,7 @@
   const E  = window.Engine;
 
   // 应用版本号：每次发布改一下，设置页可见，用来判断平板/手机是不是已经更新到新版
-  const APP_VERSION = '2026.09.14';
+  const APP_VERSION = '2026.09.19';
 
   let mainEl = null;
   let navEl  = null;
@@ -153,28 +153,21 @@
    * 轮次进度。
    *
    * 间隔重复的一个词，从学到考前会被复习多次。这里把「复习次数」
-   * 映射成用户能理解的「轮次」：
-   *   第 1 轮 = 已学（active，进入过复习循环）
-   *   第 2 轮 = 成功复习过 1 次（reps >= 1）
-   *   第 3 轮 = 成功复习过 2 次（reps >= 2）
-   *
-   * 分母是 L1+L2（真正的待背池），不含 L3 熟词 —— 熟词不参与「过两轮」目标。
+   * 两条进度都以「整本词表总数」为分母（分子恒 ≤ 分母，进度条不可能破 100%）：
+   *   覆盖 covered = 已普查建档的词（在 L1/L2/L3 任一档，即已经过过一遍）；
+   *   脱生词 settled = 其中已升到 L2 眼熟 / L3 熟词的词（不再是最密复习的 L1 生词）。
+   * 两条的差 = 还停在 L1 生词档的硬骨头数量，差距明显、各有含义，
+   * 不再出现「答对一次两条就几乎相等」的冗余。
    */
   function roundProgress(cards) {
-    const rounds = [0, 0, 0];
+    let covered = 0, settled = 0;
     Object.keys(cards).forEach(function (w) {
       const c = cards[w];
-      if (!c || !c.active) return;
-      /* 只数 L1/L2 —— L3 熟词即使被排期激活也不属于「待背池」。
-         不写这个过滤，熟词会全被算进「已学」，分子直接超过 L1+L2 分母，
-         进度条破 100%。用户实测踩到过：3192/2363。 */
-      if (c.level !== 1 && c.level !== 2) return;
-      const reps = c.reps || 0;
-      rounds[0]++;
-      if (reps >= 1) rounds[1]++;
-      if (reps >= 2) rounds[2]++;
+      if (!c || !window.WB.get(w) || c.archived) return;
+      covered++;
+      if (c.level >= 2) settled++;
     });
-    return rounds;
+    return [covered, settled];
   }
 
   /*
@@ -187,13 +180,12 @@
     if (!examDate) return null;
 
     const cards  = st.cards;
-    const counts = E.levelCounts(cards);
-    const total  = counts[0] + counts[1];     // L1 + L2
-    if (total === 0) return null;
+    const total  = window.WB.size();        // 整本词表，两条进度的统一分母
+    const rounds = roundProgress(cards);
+    if (rounds[0] === 0) return null;       // 还没普查/建档任何词时不显示冲刺面板
 
     const daysLeft  = S.daysBetween(S.today(), examDate);
-    const rounds    = roundProgress(cards);
-    const remaining = Math.max(0, total - rounds[0]);           // 还没学的
+    const remaining = Math.max(0, total - rounds[0]);           // 还没覆盖（含未普查）
     const effDays   = Math.max(1, daysLeft - 10);               // 留 10 天缓冲
     const target    = Math.max(0, Math.ceil(remaining / effDays));
 
@@ -214,15 +206,13 @@
       ])
     ]));
 
-    /* --- 进度 ---
-       「已学一遍」= 每个词第一次进入学习。覆盖进度，0→100% 对应词表全部学完，
-       这是你考前要推满的主进度。
-       「已复习巩固」= 其中答对过、已进入间隔复习的词。间隔重复里每个词独立排期：
-       当天学的新词只要答对一次，就已完成「复习巩固」这一步 ——
-       所以这项会随学习同步增长，第一天就有数字是正常的，不是「第二轮提前开始」。 */
+    /* --- 进度（分母都是整本词表）---
+       「覆盖」= 已普查建档、过过一遍的词，推满 = 整本词表都过完，这是主进度。
+       「脱离生词」= 已从 L1 生词升到 L2 眼熟 / L3 熟词的词。
+       两条之差就是还卡在 L1 生词档、需要最密集复习的硬骨头。 */
     const rows = [
-      { label: '已学一遍 · 覆盖',   n: rounds[0], strong: true },
-      { label: '已复习巩固 · 答对过', n: rounds[1] }
+      { label: '已学一遍 · 覆盖',      n: rounds[0], strong: true },
+      { label: '已脱离生词 · 眼熟+熟词', n: rounds[1] }
     ];
     const body = el('div', { class: 'sprint-rounds' });
     rows.forEach(function (r) {
@@ -240,7 +230,8 @@
     box.appendChild(body);
 
     box.appendChild(el('p', { class: 'sprint-note', text:
-      '答对即计入复习：今天学的新词只要答对，隔几天会自动回来复习 —— 不用你手动安排第二轮。' }));
+      '两条进度之差 = 还停在「生词」档、需要隔天密集复习的词。生词连对 3 次会升入眼熟，' +
+      '眼熟再连对升入熟词速过池 —— 第二条涨上去，才是真正记牢了。' }));
 
     return box;
   }
@@ -797,13 +788,13 @@
 
     g1.appendChild(checkField('按考试日期自动调整每日新词量', s.autoPace, function (v) {
       s.autoPace = v; S.save();
-    }, '开启后忽略下面的「每日新词上限」，改为按「剩余词数 ÷ 剩余天数」动态算，' +
-       '考前自动留 10 天纯复习。'));
+    }, '开启后按「整本词表剩余 ÷ 剩余天数」动态算每日新词，考前自动留 10 天纯复习。' +
+       '注意：动态量只会在赶进度时比下面的保底更多，绝不会更少 —— 复习再多也不会把新词压没。'));
 
-    g1.appendChild(numberField('每日新词上限', s.dailyNew, 0, 500, function (v) {
+    g1.appendChild(numberField('每日新词保底量', s.dailyNew, 0, 500, function (v) {
       s.dailyNew = v; S.save();
-    }, '每天最多投放多少个没学过的词。到期复习的词不受这个限制。' +
-       '（开启自动节奏后此项失效）'));
+    }, '每天至少投放多少个没学过的词。到期复习的词不受这个限制。' +
+       '自动节奏开启时它是【保底】：想多背就把它调大（如 40、50），新词不会再被压到每天十几个。'));
 
     g1.appendChild(numberField('每日复习上限', s.dailyReviewCap, -1, 1000, function (v) {
       s.dailyReviewCap = v; S.save();

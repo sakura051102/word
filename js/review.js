@@ -67,6 +67,30 @@ window.Review = (function () {
   const EXAM_BUFFER_DAYS = 10;    // 考前这么多天起停止投新词，纯滚动复习
   const DAILY_CAPACITY_MIN = 40;  // 每天计划过词总量下限（新词+复习），约半小时学习量
 
+  /*
+   * autoPace 均摊用的「考前还要新学多少词」。
+   * 关键：不能只数「已普查建档、尚未激活的 L1/L2 卡」—— 普查没做完时这个池子很小，
+   * 均摊到剩余天数每天只剩几个新词（用户实测每天只投 10 个），且永远学不完。
+   * 这里把【还没普查的词】按已普查部分中 L1/L2 的占比外推计入，让目标覆盖整本词表。
+   * 实际投放仍只取已建档的待学卡（未普查词没法定级），所以普查没做完时首页会提示去普查。
+   */
+  function paceRemaining(st) {
+    let fresh = 0, classified = 0, l12 = 0;
+    Object.keys(st.cards).forEach(function (w) {
+      const c = st.cards[w];
+      if (!c || !window.WB.get(w) || c.archived) return;
+      classified++;
+      if (c.level === 1 || c.level === 2) {
+        l12++;
+        if (!c.active) fresh++;
+      }
+    });
+    const total = window.WB.size();
+    const unclassified = Math.max(0, total - classified);
+    const ratio = classified ? l12 / classified : 0.9;
+    return fresh + Math.round(unclassified * ratio);
+  }
+
   function effectiveLimit(st, remainingL12) {
     let base;
     if (st.settings.autoPace && st.settings.examDate) {
@@ -91,6 +115,10 @@ window.Review = (function () {
         // 离缓冲期还远时别让复习把新词彻底压没，保证每天至少推进一点，否则学不完
         if (base <= 0 && remainingL12 > 0 && studyDays > 3) base = Math.min(even, 3);
         base = Math.max(0, base);
+        // 手动「每日新词上限」是【保底】：自动节奏只会在考前需要赶进度时往上加，
+        // 绝不会因为复习多就把新词压到用户设定值以下 —— 否则用户调 40 仍只投 10 个。
+        // 但整本词表都学完（剩余 0）时不再硬投，保底只在「还有词要学」时生效。
+        if (remainingL12 > 0) base = Math.max(base, Math.max(0, st.settings.dailyNew | 0));
       } else {
         base = Math.max(0, st.settings.dailyNew | 0);
       }
@@ -195,8 +223,9 @@ window.Review = (function () {
       dueItems.push({ word: w, card: cards[w], entry: window.WB.get(w), isNew: false });
     });
 
-    /* 新投放预算：今日上限减去今天已投放的 */
-    const limit  = effectiveLimit(st, freshByLevel[0].length + freshByLevel[1].length);
+    /* 新投放预算：今日上限减去今天已投放。
+       均摊基数用整本词表剩余（含未普查外推），实际能投多少仍受 freshByLevel 待学卡限制。 */
+    const limit  = effectiveLimit(st, paceRemaining(st));
     const used   = S.getDaily().new || 0;
     const budget = Math.max(0, limit - used);
 
@@ -324,9 +353,7 @@ window.Review = (function () {
 
   /* 临时把今日新词上限往上抬，用于「今天还想多背点」的情况。
      走 daily[今天].extraNew 而不是常驻改 dailyNew：
-     autoPace 下 dailyNew 是摆设（effectiveLimit 只看考试日期），
-     之前直接改 dailyNew 导致「再多放 20 个」点了没反应。
-     一次性加量只影响今天，明天自动恢复计划量。 */
+     dailyNew 是每天的保底量，一次性加量只该影响今天，明天自动恢复计划量。 */
   function raiseLimit(n) {
     S.bump('extraNew', n);
     sess = newSession();
@@ -1016,7 +1043,8 @@ window.Review = (function () {
        首页显示多少，点进去就真有多少，不会两个数字打架。 */
     const plan   = reviewPlan(st);
     const due    = plan.reviewDue;
-    const limit  = effectiveLimit(st, freshAvail[0] + freshAvail[1]);
+    // 均摊目标按整本词表剩余算（含未普查外推）；实际投放 alloc 仍受 freshAvail 待学卡上限约束
+    const limit  = effectiveLimit(st, paceRemaining(st));
     const used   = S.getDaily().new || 0;
     const budget = Math.max(0, limit - used);
     const alloc  = allocate(budget, st.settings.quota, [freshAvail[0], freshAvail[1]]);

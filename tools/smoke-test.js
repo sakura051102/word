@@ -791,19 +791,23 @@ const sTitle = queryAll(main, '.sprint-title')[0];
 check('  倒计时显示「距考研」', !!sTitle && sTitle.textContent.indexOf('距考研') >= 0,
       sTitle ? sTitle.textContent : '没找到 .sprint-title');
 
-/* 进度：L1/L2 active 50 个，其中 20 个 reps>=1 → 已学 50，复习巩固 20。
-   分母是 L1/L2 之和 = 50。5 个已激活的 L3 不能混进来 —— 否则会变 55/50。 */
+/* 进度（新口径，分母=整本词表 5530）：
+   覆盖 = 已建档的 60 张（30 L1 + 20 L2 + 10 L3，普查见过即算覆盖）；
+   脱离生词 = level≥2 的 30 张（20 眼熟 L2 + 10 熟词 L3）。
+   两条之差 30 = 还卡在 L1 生词档的硬骨头。 */
 const rNums = queryAll(main, '.sprint-round-num').map(function (n) { return n.textContent; });
-check('  进度数字正确（50 已学一遍 / 20 已复习巩固，不含 L3）',
-      rNums[0] === '50 / 50' && rNums[1] === '20 / 50',
+check('  进度数字正确（60 覆盖 / 30 脱离生词，分母整本词表）',
+      rNums[0] === '60 / 5,530' && rNums[1] === '30 / 5,530',
       rNums.join(' | '));
 
 /* 冲刺模式首页不应显示 LV 经验条（避免「累计 N 次」和词数进度混淆） */
 check('  冲刺模式下首页不显示 LV 经验条', queryAll(main, '.exp-bar').length === 0);
 
-/* 每日目标：50 个未学？不对 —— 全部已学，remaining=0，目标应为 0 */
+/* 每日目标：只建档了 60 张，整本词表 5530 还有 5470 没覆盖，
+   均摊到 90 个有效天 = ceil(5470/90) = 61 词/天（未普查词必须计入，否则会一直少投）。 */
 const sSub = queryAll(main, '.sprint-sub')[0];
-check('  全部已学时每日目标为 0', !!sSub && sSub.textContent.indexOf('0 词') >= 0,
+check('  还有整本书未覆盖时每日目标约 61 词',
+      !!sSub && sSub.textContent.indexOf('5,470') >= 0 && sSub.textContent.indexOf('61 词') >= 0,
       sSub ? sSub.textContent : '没找到 .sprint-sub');
 
 /* 主复习只跑 L1/L2：进入复习，未激活的 L3 词不应被 activate、也不应进队列
@@ -816,9 +820,12 @@ queryAll(main, '.action-card .btn').filter(function (b) {
 check('  主复习不激活、不投放 L3 词', wasInactive && st2.cards[l3word].active === false,
       'L3 词被意外激活了');
 
-/* 自动节奏：effectiveLimit 应随剩余词数动态变化，这里 0 个未学 → 上限 0 */
-check('  自动节奏下无未学词时新词上限为 0', win.Review.status().budget === 0,
-      'budget=' + win.Review.status().budget);
+/* 自动节奏：虽然这 60 张都学过了，但整本词表还有 5470 个没普查，
+   paceRemaining 会把它们按比例外推计入 → 仍要持续投放新词，且不低于每日保底 40。
+   （修复「每天只投十几个、整本词表永远学不完」） */
+const stBudget = win.Review.status().budget;
+check('  词表未覆盖完时新词持续投放、且不低于保底 40', stBudget >= 40,
+      'budget=' + stBudget);
 
 /* 恢复默认设置，避免污染后续（本测试是最后一段，其实无所谓，但保持干净） */
 st2.settings.examDate = null;
@@ -829,17 +836,24 @@ S.save();
 
 section('「今天再多放 20 个」在自动节奏下要生效');
 
-/* autoPace 场景：100 个 L1 未学，考试 100 天后。
-   effectiveLimit = ceil(100 / 90) = 2（留 10 天缓冲）。 */
+/* autoPace 场景：模拟普查已全部做完 —— 给整本词表建卡，其中 100 个 L1 待学、
+   其余建成 L3 熟词，这样均摊基数=100（而不是把未普查词也算进来）。考试 100 天后。 */
+function seedSurveyDone(stateObj, freshN) {
+  for (let i = 0; i < win.WB.size(); i++) {
+    const w = win.WB.at(i).word;
+    stateObj.cards[w] = win.Engine.createCard(i < freshN ? 1 : 3);
+  }
+}
 S.reset();
 const st3 = S.get();
-for (let i = 0; i < 100; i++) st3.cards[win.WB.at(i).word] = win.Engine.createCard(1);
+seedSurveyDone(st3, 100);
 st3.settings.examDate = S.addDays(S.today(), 100);
 st3.settings.autoPace = true;
 st3.settings.reviewBeforeTriageDone = true;
+st3.settings.dailyNew = 0;          // 先关保底，验证纯均摊 = ceil(100/90) = 2
 S.save();
 
-check('  autoPace: 100 未学 / 90 有效天 → 上限 2', win.Review.status().limit === 2,
+check('  autoPace: 普查完、100 待学 / 90 天、保底0 → 均摊 2', win.Review.status().limit === 2,
       'limit=' + win.Review.status().limit);
 
 /* 点「再多放 20」→ daily[今天].extraNew +20 → 上限 22 */
@@ -848,6 +862,18 @@ const st3b = win.Review.status();
 check('  autoPace: 再多放 20 后上限 22', st3b.limit === 22, 'limit=' + st3b.limit);
 check('  autoPace: budget = 22 - 0 = 22（能进学习界面）', st3b.budget === 22,
       'budget=' + st3b.budget);
+
+/* 保底托底（核心修复）：默认每日新词 40，即使均摊只有 2，也必须给到 40，
+   不再出现「每天只投十几个新词、永远学不完」。 */
+S.reset();
+const st3c = S.get();
+seedSurveyDone(st3c, 100);
+st3c.settings.examDate = S.addDays(S.today(), 100);
+st3c.settings.autoPace = true;
+st3c.settings.reviewBeforeTriageDone = true;   // dailyNew 保持默认 40
+S.save();
+check('  autoPace: 均摊仅 2 但每日新词保底 40 → 上限 40', win.Review.status().limit === 40,
+      'limit=' + win.Review.status().limit);
 
 /* 手动模式（无 examDate）同样走 extraNew */
 st3.settings.examDate = null;
