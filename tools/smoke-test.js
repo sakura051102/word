@@ -779,6 +779,9 @@ for (let i = 0; i < 30; i++) st2.cards[defWords[i].word] = mkCard(1, 0, true);
 for (let i = 30; i < 50; i++) st2.cards[defWords[i].word] = mkCard(2, 1, true);
 for (let i = 50; i < 55; i++) st2.cards[defWords[i].word] = mkCard(3, 1, true);   // L3 已激活
 for (let i = 55; i < 60; i++) st2.cards[defWords[i].word] = mkCard(3, 0, false);  // L3 未激活
+// 普查已建档但还没正式学的词：L1 不算覆盖、L2 不算覆盖但已脱离生词档（回归「普查完就假满格」bug）
+for (let i = 60; i < 65; i++) st2.cards[defWords[i].word] = mkCard(1, 0, false);
+for (let i = 65; i < 70; i++) st2.cards[defWords[i].word] = mkCard(2, 0, false);
 st2.settings.examDate = S.addDays(S.today(), 100);
 st2.settings.autoPace = true;
 st2.settings.reviewBeforeTriageDone = true;   // 让首页显示「开始复习」入口
@@ -791,23 +794,25 @@ const sTitle = queryAll(main, '.sprint-title')[0];
 check('  倒计时显示「距考研」', !!sTitle && sTitle.textContent.indexOf('距考研') >= 0,
       sTitle ? sTitle.textContent : '没找到 .sprint-title');
 
-/* 进度（新口径，分母=整本词表 5530）：
-   覆盖 = 已建档的 60 张（30 L1 + 20 L2 + 10 L3，普查见过即算覆盖）；
-   脱离生词 = level≥2 的 30 张（20 眼熟 L2 + 10 熟词 L3）。
-   两条之差 30 = 还卡在 L1 生词档的硬骨头。 */
+/* 进度（分母=整本词表 5530）：
+   覆盖 = 学过的 60 张：30 active L1 + 20 active L2 + 10 L3（熟词本来就会）；
+          另外 5 张未激活 L1、5 张未激活 L2 只是普查建档、还没学，【不算覆盖】。
+   脱离生词 = 20 active L2 + 5 未激活 L2（判了眼熟即非生词）+ 10 L3 = 35。 */
 const rNums = queryAll(main, '.sprint-round-num').map(function (n) { return n.textContent; });
-check('  进度数字正确（60 覆盖 / 30 脱离生词，分母整本词表）',
-      rNums[0] === '60 / 5,530' && rNums[1] === '30 / 5,530',
+check('  进度：建档未学不算覆盖（60 覆盖 / 35 脱离生词）',
+      rNums[0] === '60 / 5,530' && rNums[1] === '35 / 5,530',
       rNums.join(' | '));
 
 /* 冲刺模式首页不应显示 LV 经验条（避免「累计 N 次」和词数进度混淆） */
 check('  冲刺模式下首页不显示 LV 经验条', queryAll(main, '.exp-bar').length === 0);
 
-/* 每日目标：只建档了 60 张，整本词表 5530 还有 5470 没覆盖，
-   均摊到 90 个有效天 = ceil(5470/90) = 61 词/天（未普查词必须计入，否则会一直少投）。 */
+/* 待背 = 整本词表 5530 − 已覆盖 60 = 5470（普查建档但没学的不算覆盖）；
+   每日新学目标直接取复习引擎今天实际投放上限，与复习卡「新学 N」同源，不硬编码。 */
 const sSub = queryAll(main, '.sprint-sub')[0];
-check('  还有整本书未覆盖时每日目标约 61 词',
-      !!sSub && sSub.textContent.indexOf('5,470') >= 0 && sSub.textContent.indexOf('61 词') >= 0,
+const expectLimit = win.Review.status().limit;
+check('  待背 5,470 且每日新学目标=引擎实际上限',
+      !!sSub && sSub.textContent.indexOf('5,470') >= 0 &&
+        sSub.textContent.indexOf('每日新学约 ' + expectLimit + ' 词') >= 0,
       sSub ? sSub.textContent : '没找到 .sprint-sub');
 
 /* 主复习只跑 L1/L2：进入复习，未激活的 L3 词不应被 activate、也不应进队列

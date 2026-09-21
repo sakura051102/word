@@ -10,7 +10,7 @@
   const E  = window.Engine;
 
   // 应用版本号：每次发布改一下，设置页可见，用来判断平板/手机是不是已经更新到新版
-  const APP_VERSION = '2026.09.19';
+  const APP_VERSION = '2026.09.21';
 
   let mainEl = null;
   let navEl  = null;
@@ -153,19 +153,23 @@
    * 轮次进度。
    *
    * 间隔重复的一个词，从学到考前会被复习多次。这里把「复习次数」
-   * 两条进度都以「整本词表总数」为分母（分子恒 ≤ 分母，进度条不可能破 100%）：
-   *   覆盖 covered = 已普查建档的词（在 L1/L2/L3 任一档，即已经过过一遍）；
-   *   脱生词 settled = 其中已升到 L2 眼熟 / L3 熟词的词（不再是最密复习的 L1 生词）。
-   * 两条的差 = 还停在 L1 生词档的硬骨头数量，差距明显、各有含义，
-   * 不再出现「答对一次两条就几乎相等」的冗余。
+   * 两条进度都以「整本词表总数」为分母（分子恒 ≤ 分母，进度条不可能破 100%）。
+   * 关键：普查建档只是给词分类，不等于学过 —— 不能把「已建档」当成「已覆盖」，
+   * 否则普查一做完第一条就假满格、待背显示 0，但其实还有大量生词没开始学。
+   *   覆盖 covered = 真正进入过学习的词：已激活(active)的 L1/L2 + 全部 L3 熟词
+   *              （熟词普查时就判定会了，算覆盖）+ 已归档(archived)的词；
+   *   脱生词 settled = 当前不在 L1 生词档：L2 眼熟 + L3 熟词 + 已归档。
+   * 第一条未满 = 还有词没正式学；两条之差 = 还在 L1 生词档、需隔天密集复习的硬骨头。
    */
   function roundProgress(cards) {
     let covered = 0, settled = 0;
     Object.keys(cards).forEach(function (w) {
       const c = cards[w];
-      if (!c || !window.WB.get(w) || c.archived) return;
-      covered++;
-      if (c.level >= 2) settled++;
+      if (!c || !window.WB.get(w)) return;
+      if (c.archived) { covered++; settled++; return; }
+      if (c.level === 3) { covered++; settled++; return; }  // 熟词：本来就会
+      if (c.level === 2) settled++;                        // 眼熟：已脱离生词档
+      if (c.active) covered++;                             // L1/L2 只有真正学过才算覆盖
     });
     return [covered, settled];
   }
@@ -182,12 +186,14 @@
     const cards  = st.cards;
     const total  = window.WB.size();        // 整本词表，两条进度的统一分母
     const rounds = roundProgress(cards);
-    if (rounds[0] === 0) return null;       // 还没普查/建档任何词时不显示冲刺面板
+    if (rounds[0] === 0) return null;       // 还没学过任何词、也没有熟词时不显示冲刺面板
 
     const daysLeft  = S.daysBetween(S.today(), examDate);
-    const remaining = Math.max(0, total - rounds[0]);           // 还没覆盖（含未普查）
-    const effDays   = Math.max(1, daysLeft - 10);               // 留 10 天缓冲
-    const target    = Math.max(0, Math.ceil(remaining / effDays));
+    const remaining = Math.max(0, total - rounds[0]);           // 还没正式学过（含未普查）
+    /* 每日目标直接取复习引擎今天【实际计划投放】的新词上限（自动节奏 + 保底后的结果），
+       与下方复习卡的「新学 N 个」同源 —— 不会再出现「目标 0 却新学 100」的自相矛盾。 */
+    let target = 0;
+    try { target = window.Review.status().limit || 0; } catch (e) { target = 0; }
 
     const box = el('div', { class: 'sprint' });
 
@@ -201,14 +207,15 @@
         el('div', { class: 'sprint-title', text: daysLeft > 0 ? '距考研' : '今天考试' }),
         el('div', { class: 'sprint-sub', text:
           daysLeft > 0
-            ? '待背 ' + fmtNum(remaining) + ' 词 · 每日目标约 ' + fmtNum(target) + ' 词'
+            ? '待背 ' + fmtNum(remaining) + ' 词 · 每日新学约 ' + fmtNum(target) + ' 词'
             : '加油' })
       ])
     ]));
 
     /* --- 进度（分母都是整本词表）---
-       「覆盖」= 已普查建档、过过一遍的词，推满 = 整本词表都过完，这是主进度。
-       「脱离生词」= 已从 L1 生词升到 L2 眼熟 / L3 熟词的词。
+       「覆盖」= 真正学过的词（已激活的 L1/L2）+ 本来就会的 L3 熟词；只普查建档、
+       还没开始学的生词不算，推满 = 整本词表都过完，这是主进度。
+       「脱离生词」= 当前在 L2 眼熟 / L3 熟词档的词。
        两条之差就是还卡在 L1 生词档、需要最密集复习的硬骨头。 */
     const rows = [
       { label: '已学一遍 · 覆盖',      n: rounds[0], strong: true },
