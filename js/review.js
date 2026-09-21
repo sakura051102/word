@@ -764,11 +764,17 @@ window.Review = (function () {
         onclick: function () { answerQuiz(i); }
       }, optKids));
     });
-    box.appendChild(opts);
     if (sess.stage === 'answered') {
       const wrongOpt = q.options[q.chosen];
       const right = wrongOpt && wrongOpt.correct;
-      box.appendChild(el('div', {
+      /* 作答后把「选项 + 判定 + 混淆词对照 + 释义」全部收进 quiz-body —— 一个在卡片
+         内部滚动的弹性区；「继续 / 加入单词本 / 归类」收进 quiz-foot 固定在卡片底部。
+         这样横屏平板高度不够时，被压缩/滚动的只有 quiz-body，正确选项永远完整、
+         判定行不会压到选项上、「继续」永远可见（旧实现让选项区和释义区各自伸缩，
+         grid 分栏下会把选项行压扁，出现文字重叠、正确答案被裁）。 */
+      const body = el('div', { class: 'quiz-body' });
+      body.appendChild(opts);
+      body.appendChild(el('div', {
         class: 'quiz-verdict ' + (right ? 'is-right' : 'is-wrong'),
         text: right ? '答对了' : '答错了 —— 这个词已重新排进高频复习'
       }));
@@ -786,18 +792,24 @@ window.Review = (function () {
             onclick: function (e) { e.stopPropagation(); window.Speak.say(wrongOpt.word); }
           }, [el('span', { text: '🔊', 'aria-hidden': 'true' })]));
         }
-        box.appendChild(el('div', { class: 'quiz-confuse' }, confuseKids));
+        body.appendChild(el('div', { class: 'quiz-confuse' }, confuseKids));
       }
-      box.appendChild(window.DefsView.render(it.entry, { compact: true, citeLimit: 2 }));
-      box.appendChild(el('div', { class: 'card-actions' }, [
+      body.appendChild(window.DefsView.render(it.entry, { compact: true, citeLimit: 2 }));
+      box.appendChild(body);
+
+      const foot = el('div', { class: 'quiz-foot' });
+      foot.appendChild(el('div', { class: 'card-actions' }, [
         el('button', {
           class: 'btn btn--primary btn--wide', type: 'button',
           onclick: continueAfterQuiz
         }, [el('span', { text: '继续' }), el('kbd', { text: 'Space' })])
       ]));
-      box.appendChild(notebookBar(it));
-      box.appendChild(levelSwitch(it));
+      const nb = notebookBar(it);
+      if (nb) foot.appendChild(nb);
+      foot.appendChild(levelSwitch(it));
+      box.appendChild(foot);
     } else {
+      box.appendChild(opts);
       box.appendChild(el('p', { class: 'keyhint', text: '按 1–4 选择' }));
     }
     return box;

@@ -985,6 +985,12 @@ textarea.my-note-input { width: 100%; resize: vertical; line-height: 1.6; }
 .quiz-confuse-text { flex: 1 1 auto; }
 .quiz-confuse .speak-btn { flex: 0 0 auto; }
 
+/* 选择题作答后：中间内容（选项/判定/对照/释义）的统一容器 + 固定底部操作区。
+   窄屏（<621px，整页滚动）里两者自然撑高；宽屏一屏化里 quiz-body 才变弹性滚动区。 */
+.quiz-body { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.quiz-foot { display: flex; flex-direction: column; gap: 8px; }
+.quiz-foot .card-actions { margin-top: 0; }
+
 .card--upgrade { text-align: center; align-items: center; }
 .upgrade-word {
   font-size: 1.9rem; font-weight: 700; margin: 6px 0;
@@ -1348,7 +1354,7 @@ input:focus-visible, [tabindex]:focus-visible {
   .card-hint, .triage-hint, .keyhint, .quiz-kind,
   .verify-banner, .quiz-verdict, .quiz-confuse { flex: 0 0 auto; }
   .grade-row, .triage-actions, .verify-actions,
-  .card-actions, .lv-switch, .nb-bar { flex: 0 0 auto; }
+  .card-actions, .lv-switch, .nb-bar, .quiz-foot { flex: 0 0 auto; }
 
   /* 释义区 / 选择题选项区：占据中间剩余空间，超出只在卡片内部滚动，
      绝不再把底部按钮顶出屏幕 —— 这是「一屏」成立的关键 */
@@ -1361,17 +1367,20 @@ input:focus-visible, [tabindex]:focus-visible {
     flex: 1 1 auto; min-height: 0;
     overflow: auto; overscroll-behavior: contain; padding-right: 4px;
   }
-  /* 选择题作答后：正确释义才是重点。干扰项直接隐藏（只留正确项和你错选的那项）。
-     关键：选项区不能 flex:0 0 auto 硬撑 —— 答错时错选项多一行「其实意为…」、
-     再加判定行/混淆词对照行，固定高度会超过横屏平板，把释义压没、把「继续」顶出屏幕。
-     因此选项区可收缩、上限 30dvh、超出在卡片内滚动；释义区 flex:1 同样内部滚动，
-     底部「继续/加入单词本/归类」永远钉在卡片底部可见。 */
-  .card--quiz:has(.quiz-verdict) .quiz-options {
-    flex: 0 1 auto; min-height: 0; max-height: 30dvh;
-    overflow: auto; overscroll-behavior: contain;
+  /* 选择题作答后：quiz-body 是【唯一】弹性滚动区（选项/判定/对照/释义都在里面，
+     按自然高度排列、超出只在这个区内滚动，所以正确选项永远完整、判定行不会压到选项）；
+     quiz-foot（继续 / 加入单词本 / 归类）flex:0 0 auto 永远钉在卡片底部可见。 */
+  .card--quiz:has(.quiz-verdict) .quiz-body {
+    flex: 1 1 auto; min-height: 0;
+    overflow: auto; overscroll-behavior: contain; padding-right: 4px;
   }
+  .card--quiz:has(.quiz-verdict) .quiz-foot { flex: 0 0 auto; }
   .card--quiz:has(.quiz-verdict) .quiz-opt.is-dim { display: none; }
-  .card--quiz:has(.quiz-verdict) .defs-view { flex: 1 1 auto; min-height: 0; overflow: auto; }
+  /* body 已统一滚动，内部选项区/释义区不再各自限高、不再内部滚动，避免被 grid/flex 压扁 */
+  .card--quiz:has(.quiz-verdict) .quiz-options,
+  .card--quiz:has(.quiz-verdict) .defs-view {
+    flex: 0 0 auto; min-height: 0; max-height: none; overflow: visible;
+  }
   .card-actions { margin-top: auto; }
 }
 
@@ -1420,10 +1429,19 @@ input:focus-visible, [tabindex]:focus-visible {
   .review-stage .card .defs-view,
   .triage-stage .triage-card .defs-view { max-height: 46dvh; }
   .review-stage .quiz-options { max-height: 44dvh; }
-  /* 作答后：干扰项已隐藏；选项区仍设上限可内部滚动（错选项多一行、再加对照行时
-     不会把释义和「继续」挤出屏幕），释义放宽到 60dvh 保证一眼看到正确意思 */
-  .review-stage .card--quiz:has(.quiz-verdict) .quiz-options { max-height: 30dvh; min-height: 0; overflow: auto; }
-  .review-stage .card--quiz:has(.quiz-verdict) .defs-view { max-height: 60dvh; min-height: 0; overflow: auto; }
+  /* 作答后右栏重排为三行：题型(顶) / quiz-body(弹性、内部滚动) / quiz-foot(固定底)。
+     选项/判定/对照/释义都在 quiz-body 里按自然高度排列 —— 长释义折行时被压缩/滚动的
+     只是 quiz-body，选项行保持完整，不会再出现判定压选项、正确答案被裁的重叠。 */
+  .review-stage .card--quiz:has(.quiz-verdict) { grid-template-rows: auto minmax(0, 1fr) auto; }
+  .review-stage .card--quiz:has(.quiz-verdict) .quiz-kind { grid-column: 2; grid-row: 1; align-self: start; }
+  .review-stage .card--quiz:has(.quiz-verdict) .quiz-body {
+    grid-column: 2; grid-row: 2; min-height: 0;
+    overflow: auto; overscroll-behavior: contain; padding-right: 4px;
+  }
+  .review-stage .card--quiz:has(.quiz-verdict) .quiz-foot { grid-column: 2; grid-row: 3; }
+  /* 选项/释义已在 quiz-body 内自然排列，不再各自限高，避免被 grid 行压扁 */
+  .review-stage .card--quiz:has(.quiz-verdict) .quiz-options,
+  .review-stage .card--quiz:has(.quiz-verdict) .defs-view { max-height: none; overflow: visible; }
   .review-stage .word-head--big .word-text,
   .triage-stage .word-head--big .word-text { font-size: clamp(1.8rem, 6vh, 2.8rem); }
 }
